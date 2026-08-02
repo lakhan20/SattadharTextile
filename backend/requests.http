@@ -1,0 +1,110 @@
+### Sattadhar Textile — Auth + RBAC
+### VS Code "REST Client" extension (humao.rest-client). Run requests top to bottom.
+
+@base = http://localhost:4000
+@api = {{base}}/api/v1
+
+### ─── 0. Health (public) ────────────────────────────────────────────────
+GET {{base}}/health
+
+### ─── 1. Login as ADMIN ─────────────────────────────────────────────────
+# @name adminLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "admin", "password": "ChangeMe@123" }
+
+###
+@adminAccess = {{adminLogin.response.body.data.accessToken}}
+@adminRefresh = {{adminLogin.response.body.data.refreshToken}}
+
+### ─── 2. Login as STAFF ─────────────────────────────────────────────────
+# @name staffLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "kirti", "password": "Staff@123" }
+
+###
+@staffAccess = {{staffLogin.response.body.data.accessToken}}
+@staffRefresh = {{staffLogin.response.body.data.refreshToken}}
+
+### ─── 3. Who am I (STAFF) ───────────────────────────────────────────────
+GET {{api}}/auth/me
+Authorization: Bearer {{staffAccess}}
+
+### ─── 4. Wrong password → 401 INVALID_CREDENTIALS ───────────────────────
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "meera", "password": "definitely-wrong" }
+
+### ─── 5. Unknown username → identical 401 (no enumeration) ──────────────
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "ghost", "password": "definitely-wrong" }
+
+### ─── 6. Lockout — send this 5 times → 5th returns 423 ACCOUNT_LOCKED ───
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "meera", "password": "definitely-wrong" }
+
+### ─── 7. Correct password while locked → still 423 ──────────────────────
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "meera", "password": "Staff@123" }
+
+### ─── 8. Refresh → new access token, same session ───────────────────────
+POST {{api}}/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{staffRefresh}}" }
+
+### ─── 9. RBAC: STAFF hits an ADMIN-only route → 403 FORBIDDEN ───────────
+POST {{api}}/auth/admin/reset-password
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{ "userId": "00000000-0000-4000-8000-000000000000", "newPassword": "Brand@New1" }
+
+### ─── 10. No token at all → 401 UNAUTHENTICATED (not 403) ───────────────
+POST {{api}}/auth/admin/reset-password
+Content-Type: application/json
+
+{ "userId": "00000000-0000-4000-8000-000000000000", "newPassword": "Brand@New1" }
+
+### ─── 11. ADMIN unlocks meera by resetting her password ─────────────────
+# Replace <MEERA_ID> — get it from psql:
+#   select id, username from users;
+POST {{api}}/auth/admin/reset-password
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "userId": "<MEERA_ID>", "newPassword": "Brand@New1" }
+
+### ─── 12. Weak password → 400 VALIDATION_ERROR ──────────────────────────
+POST {{api}}/auth/admin/reset-password
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "userId": "<MEERA_ID>", "newPassword": "short" }
+
+### ─── 13. Logout this session ───────────────────────────────────────────
+POST {{api}}/auth/logout
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{}
+
+### ─── 14. Same access token after logout → 401 TOKEN_REVOKED ────────────
+GET {{api}}/auth/me
+Authorization: Bearer {{staffAccess}}
+
+### ─── 15. Refresh with the revoked jti → 401 TOKEN_REVOKED ──────────────
+POST {{api}}/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{staffRefresh}}" }

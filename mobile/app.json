@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Sattadhar Textile",
+    "slug": "sattadhar-textile",
+    "scheme": "sattadhar",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F8F3E9",
+    "primaryColor": "#262A5E",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sattadhar.textile",
+      "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true
+      }
+    },
+    "android": {
+      "package": "com.sattadhar.textile",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#262A5E",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#262A5E"
+        }
+      ],
+      "expo-secure-store",
+      "expo-localization",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Sattadhar Textile needs access to your photos to add a product image.",
+          "cameraPermission": "Sattadhar Textile needs access to your camera to photograph a product."
+        }
+      ],
+      "expo-sharing"
+    ]
+  }
+}

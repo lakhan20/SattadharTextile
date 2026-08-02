@@ -1,0 +1,114 @@
+### Sattadhar Textile — Stock module
+### VS Code "REST Client" extension (humao.rest-client). Run top to bottom.
+### Sign in first (steps 1–2), then paste the two product ids from step 3.
+
+@base = http://localhost:4000
+@api = {{base}}/api/v1
+
+### ─── 1. Login as ADMIN ─────────────────────────────────────────────────
+# @name adminLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "admin", "password": "ChangeMe@123" }
+
+###
+@adminAccess = {{adminLogin.response.body.data.accessToken}}
+
+### ─── 2. Login as STAFF ─────────────────────────────────────────────────
+# @name staffLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "kirti", "password": "Staff@123" }
+
+###
+@staffAccess = {{staffLogin.response.body.data.accessToken}}
+
+### ─── 3. Find the seeded products — copy two ids below ──────────────────
+# COT-SHIRT-WHT-003 is METER, SAR-WED-MRN-001 is PIECE,
+# COT-SHIRT-SKY-003 is seeded BELOW its reorder level.
+GET {{api}}/products?pageSize=50
+Authorization: Bearer {{adminAccess}}
+
+###
+@meterProductId = <PASTE_A_METER_PRODUCT_ID>
+@pieceProductId = <PASTE_A_PIECE_PRODUCT_ID>
+
+### ─── 4. Stock-in on a METER product, decimal quantity ──────────────────
+POST {{api}}/stock/in
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "productId": "{{meterProductId}}", "qty": 25.5, "reason": "New purchase", "supplierRef": "CH-1042", "rate": 155 }
+
+### ─── 5. Same product, 2 decimals too many → 400 VALIDATION_ERROR ───────
+POST {{api}}/stock/in
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "productId": "{{meterProductId}}", "qty": 1.23456, "reason": "Too precise" }
+
+### ─── 6. Stock-in on a PIECE product, whole number ──────────────────────
+POST {{api}}/stock/in
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "productId": "{{pieceProductId}}", "qty": 6, "reason": "New purchase" }
+
+### ─── 7. Fractional piece → 400 VALIDATION_ERROR ────────────────────────
+POST {{api}}/stock/in
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "productId": "{{pieceProductId}}", "qty": 2.5, "reason": "Half a saree" }
+
+### ─── 8. Adjustment down, with a reason ─────────────────────────────────
+POST {{api}}/stock/adjust
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "productId": "{{meterProductId}}", "qty": -3.5, "reason": "Damage — water stain on the bolt end" }
+
+### ─── 9. Adjustment with no reason → 400 VALIDATION_ERROR ───────────────
+POST {{api}}/stock/adjust
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "productId": "{{meterProductId}}", "qty": -1 }
+
+### ─── 10. Adjustment past zero → 409 CONFLICT ──────────────────────────
+POST {{api}}/stock/adjust
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "productId": "{{meterProductId}}", "qty": -999999, "reason": "Should be refused" }
+
+### ─── 11. Movement ledger for that product, newest first ────────────────
+# After creating a bill for this product, its SALE row appears here with the
+# bill id and number attached.
+GET {{api}}/stock/movements?productId={{meterProductId}}&pageSize=20
+Authorization: Bearer {{adminAccess}}
+
+### ─── 12. Same ledger as STAFF → no `rate` key on any row ───────────────
+GET {{api}}/stock/movements?productId={{meterProductId}}&pageSize=20
+Authorization: Bearer {{staffAccess}}
+
+### ─── 13. Low stock — visible to STAFF, no cost data ────────────────────
+GET {{api}}/stock/low
+Authorization: Bearer {{staffAccess}}
+
+### ─── 14. Valuation as ADMIN → 200 ──────────────────────────────────────
+GET {{api}}/stock/valuation
+Authorization: Bearer {{adminAccess}}
+
+### ─── 15. Valuation as STAFF → 403 FORBIDDEN ────────────────────────────
+GET {{api}}/stock/valuation
+Authorization: Bearer {{staffAccess}}
+
+### ─── 16. Stock-in as STAFF without the toggle → 403 FORBIDDEN ──────────
+POST {{api}}/stock/in
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{ "productId": "{{meterProductId}}", "qty": 10, "reason": "Should be refused" }

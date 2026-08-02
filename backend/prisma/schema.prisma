@@ -1,0 +1,714 @@
+// Sattadhar Textile — Prisma schema
+// PostgreSQL 16 · fabric wholesale + retail trading (single shop, Gujarat, India)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+enum Language {
+  EN
+  GU
+}
+
+enum Unit {
+  METER
+  PIECE
+}
+
+enum CustomerType {
+  RETAIL
+  WHOLESALE
+}
+
+enum BillingMode {
+  GST // Tax Invoice  → FY26/T/00001
+  NON_GST // Estimate     → FY26/E/00001
+}
+
+enum TaxType {
+  CGST_SGST // intra-state (customer state == shop state == Gujarat)
+  IGST // inter-state
+  NONE // estimate / non-GST bill
+}
+
+enum BillStatus {
+  DRAFT
+  FINAL
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  BANK
+  CHEQUE
+  CARD
+  CREDIT // sale on khata — raises outstanding
+}
+
+enum DiscountType {
+  PERCENT
+  FLAT
+}
+
+enum DiscountScope {
+  LINE
+  BILL
+  CATEGORY
+  CUSTOMER
+}
+
+enum StockMovementType {
+  OPENING
+  STOCK_IN
+  SALE
+  SALE_RETURN
+  ADJUSTMENT
+  BILL_CANCELLED
+}
+
+enum LedgerEntryType {
+  OPENING
+  SALE
+  PAYMENT
+  CREDIT_NOTE
+  DEBIT_NOTE
+}
+
+enum NoteType {
+  CREDIT
+  DEBIT
+}
+
+enum DispatchChannel {
+  WHATSAPP
+  EMAIL
+  SMS
+}
+
+enum DispatchStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  RESTORE
+  LOGIN
+  LOGIN_FAILED
+  LOGOUT
+  PASSWORD_RESET
+  TOKEN_REVOKED
+  EXPORT
+  IMPORT
+  BILL_CANCELLED
+}
+
+// ─────────────────────────────────────────────────────────────
+// IDENTITY / AUTH
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id       String @id @default(uuid())
+  username String @unique
+  name     String
+  phone    String?
+  email    String?
+
+  passwordHash String
+  role         Role     @default(STAFF)
+  language     Language @default(EN)
+
+  isActive Boolean @default(true)
+
+  // Discount engine: per-staff ceiling. Bills exceeding this are rejected server-side.
+  maxDiscountPercent Decimal @default(0) @db.Decimal(5, 2)
+
+  // Granular toggles, e.g. { "canStockIn": true, "canEditCustomer": false }.
+  // Never widens beyond what the role allows — only narrows.
+  permissions Json @default("{}")
+
+  // 5-attempt lockout
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  passwordChangedAt   DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers User[] @relation("UserCreatedBy")
+
+  refreshTokens   RefreshToken[]
+  bills           Bill[]          @relation("BillCreatedBy")
+  cancelledBills  Bill[]          @relation("BillCancelledBy")
+  stockMovements  StockMovement[]
+  payments        Payment[]
+  notes           CreditDebitNote[]
+  auditLogs       AuditLog[]
+  dispatches      BillDispatch[]
+
+  @@index([role, isActive])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+/// One row per issued refresh token. Logout / deactivation revokes by `jti`.
+model RefreshToken {
+  jti       String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  replacedBy String?
+  userAgent String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────
+// MASTERS
+// ─────────────────────────────────────────────────────────────
+
+model Category {
+  id          String  @id @default(uuid())
+  name        String
+  code        String
+  description String?
+  imageUrl    String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  subCategories SubCategory[]
+  products      Product[]
+  discountRules DiscountRule[]
+
+  @@unique([name, deletedAt])
+  @@unique([code, deletedAt])
+  @@index([deletedAt])
+  @@map("categories")
+}
+
+model SubCategory {
+  id         String   @id @default(uuid())
+  name       String
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  isActive   Boolean  @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  products Product[]
+
+  @@unique([categoryId, name, deletedAt])
+  @@index([categoryId, deletedAt])
+  @@map("sub_categories")
+}
+
+model Product {
+  id            String       @id @default(uuid())
+  name          String
+  sku           String       @unique
+  barcode       String?      @unique
+  categoryId    String
+  category      Category     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  subCategoryId String?
+  subCategory   SubCategory? @relation(fields: [subCategoryId], references: [id], onDelete: SetNull)
+
+  hsnCode String?
+  unit    Unit   @default(METER)
+
+  retailRate    Decimal @db.Decimal(14, 2)
+  wholesaleRate Decimal @db.Decimal(14, 2)
+  /// ADMIN-ONLY. Stripped from every STAFF-facing serializer and report.
+  costPrice     Decimal @default(0) @db.Decimal(14, 2)
+  gstPercent    Decimal @default(5) @db.Decimal(5, 2)
+
+  // Fabric attributes
+  colour String?
+  width  String? // e.g. "44 inch"
+  gsm    Int?
+
+  imageUrl String?
+
+  openingStock Decimal @default(0) @db.Decimal(14, 3)
+  currentStock Decimal @default(0) @db.Decimal(14, 3)
+  reorderLevel Decimal @default(0) @db.Decimal(14, 3)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  billItems      BillItem[]
+  stockMovements StockMovement[]
+  discountRules  DiscountRule[]
+
+  @@index([categoryId, deletedAt])
+  @@index([subCategoryId])
+  @@index([name])
+  @@index([deletedAt, isActive])
+  @@map("products")
+}
+
+model Customer {
+  id    String  @id @default(uuid())
+  name  String
+  phone String
+  email String?
+  gstin String?
+
+  addressLine String?
+  city        String?
+  /// Drives CGST+SGST (Gujarat) vs IGST (anything else). Shop state is Gujarat.
+  state       String  @default("Gujarat")
+  pincode     String?
+
+  type CustomerType @default(RETAIL)
+
+  creditLimit    Decimal @default(0) @db.Decimal(14, 2)
+  openingBalance Decimal @default(0) @db.Decimal(14, 2)
+  /// Denormalised running outstanding. Source of truth = ledger_entries; kept in sync in-transaction.
+  outstanding    Decimal @default(0) @db.Decimal(14, 2)
+
+  isActive Boolean @default(true)
+  notes    String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  bills         Bill[]
+  ledgerEntries LedgerEntry[]
+  payments      Payment[]
+  notesIssued   CreditDebitNote[]
+  discountRules DiscountRule[]
+
+  @@unique([phone, deletedAt])
+  @@index([name])
+  @@index([type, deletedAt])
+  @@map("customers")
+}
+
+// ─────────────────────────────────────────────────────────────
+// DISCOUNT ENGINE
+// ─────────────────────────────────────────────────────────────
+
+/// Rules are evaluated by scope, then by `priority` (desc). Only ADMIN may write.
+model DiscountRule {
+  id    String        @id @default(uuid())
+  name  String
+  type  DiscountType
+  scope DiscountScope
+  value Decimal       @db.Decimal(14, 2) // percent when PERCENT, rupees when FLAT
+
+  // Eligibility conditions (all present ones must hold)
+  minQty       Decimal?      @db.Decimal(14, 3)
+  minAmount    Decimal?      @db.Decimal(14, 2)
+  customerType CustomerType?
+
+  // Targets — set the one matching `scope`
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  productId  String?
+  product    Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  maxDiscountPercent Decimal? @db.Decimal(5, 2) // cap for this rule
+  priority           Int      @default(0)
+  validFrom          DateTime?
+  validTo            DateTime?
+  isActive           Boolean  @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([scope, isActive, deletedAt])
+  @@index([categoryId])
+  @@index([customerId])
+  @@index([productId])
+  @@map("discount_rules")
+}
+
+// ─────────────────────────────────────────────────────────────
+// BILLING
+// ─────────────────────────────────────────────────────────────
+
+/// Two independent counters per financial year: (FY26, GST) and (FY26, NON_GST).
+/// Incremented inside the bill transaction with a row lock.
+model NumberSeries {
+  id          String      @id @default(uuid())
+  fy          String // "FY26"
+  billingMode BillingMode
+  prefix      String // "T" | "E"
+  lastNumber  Int         @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([fy, billingMode])
+  @@map("number_series")
+}
+
+model Bill {
+  id          String      @id @default(uuid())
+  billNumber  String      @unique // FY26/T/00001 | FY26/E/00001
+  billingMode BillingMode
+  fy          String
+  seq         Int
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  // Walk-in retail sale without a saved customer
+  walkInName  String?
+  walkInPhone String?
+
+  billDate DateTime @default(now())
+
+  // Snapshots so a reprint is never rewritten by later master edits
+  customerNameSnapshot String?
+  customerGstin        String?
+  placeOfSupplyState   String  @default("Gujarat")
+  taxType              TaxType @default(NONE)
+
+  subTotal          Decimal @default(0) @db.Decimal(14, 2) // sum(qty × rate) before any discount
+  lineDiscountTotal Decimal @default(0) @db.Decimal(14, 2)
+  billDiscountType  DiscountType?
+  billDiscountValue Decimal @default(0) @db.Decimal(14, 2)
+  billDiscountAmount Decimal @default(0) @db.Decimal(14, 2)
+  /// Effective overall discount %, validated against the creating staff's cap.
+  effectiveDiscountPercent Decimal @default(0) @db.Decimal(5, 2)
+
+  taxableValue Decimal @default(0) @db.Decimal(14, 2)
+  cgstAmount   Decimal @default(0) @db.Decimal(14, 2)
+  sgstAmount   Decimal @default(0) @db.Decimal(14, 2)
+  igstAmount   Decimal @default(0) @db.Decimal(14, 2)
+  roundOff     Decimal @default(0) @db.Decimal(14, 2)
+  grandTotal   Decimal @default(0) @db.Decimal(14, 2)
+
+  /// Sum of costPrice × qty at sale time. ADMIN-only; powers profit-margin report.
+  costTotal Decimal @default(0) @db.Decimal(14, 2)
+
+  paymentMode   PaymentMode   @default(CASH)
+  paidAmount    Decimal       @default(0) @db.Decimal(14, 2)
+  dueAmount     Decimal       @default(0) @db.Decimal(14, 2)
+  paymentStatus PaymentStatus @default(UNPAID)
+
+  status       BillStatus @default(FINAL)
+  notes        String?
+  cancelReason String?
+
+  // PDFs are generated per language; both may coexist.
+  pdfPathEn String?
+  pdfPathGu String?
+
+  createdById   String
+  createdBy     User      @relation("BillCreatedBy", fields: [createdById], references: [id])
+  cancelledById String?
+  cancelledBy   User?     @relation("BillCancelledBy", fields: [cancelledById], references: [id])
+  cancelledAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items          BillItem[]
+  stockMovements StockMovement[]
+  ledgerEntries  LedgerEntry[]
+  allocations    PaymentAllocation[]
+  notesIssued    CreditDebitNote[]
+  dispatches     BillDispatch[]
+
+  @@index([billDate])
+  @@index([createdById, billDate]) // STAFF "own bills only" queries
+  @@index([customerId, billDate])
+  @@index([billingMode, fy, seq])
+  @@index([paymentStatus, dueAmount])
+  @@map("bills")
+}
+
+model BillItem {
+  id     String @id @default(uuid())
+  billId String
+  bill   Bill   @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  // Snapshots for faithful reprints
+  productName String
+  hsnCode     String?
+  colour      String?
+  unit        Unit
+
+  /// METER → up to 3 decimals; PIECE → whole numbers (enforced in zod + service).
+  qty  Decimal @db.Decimal(14, 3)
+  rate Decimal @db.Decimal(14, 2)
+
+  discountType   DiscountType?
+  discountValue  Decimal       @default(0) @db.Decimal(14, 2)
+  discountAmount Decimal       @default(0) @db.Decimal(14, 2)
+  appliedRuleId  String?
+
+  taxableValue Decimal @db.Decimal(14, 2)
+  gstPercent   Decimal @default(0) @db.Decimal(5, 2)
+  cgstAmount   Decimal @default(0) @db.Decimal(14, 2)
+  sgstAmount   Decimal @default(0) @db.Decimal(14, 2)
+  igstAmount   Decimal @default(0) @db.Decimal(14, 2)
+  lineTotal    Decimal @db.Decimal(14, 2)
+
+  /// ADMIN-only snapshot; never serialised for STAFF.
+  costPriceSnapshot Decimal @default(0) @db.Decimal(14, 2)
+
+  sortOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([billId])
+  @@index([productId, createdAt]) // product-wise sales
+  @@map("bill_items")
+}
+
+/// Delivery log for WhatsApp / Email / SMS.
+model BillDispatch {
+  id       String          @id @default(uuid())
+  billId   String
+  bill     Bill            @relation(fields: [billId], references: [id], onDelete: Cascade)
+  channel  DispatchChannel
+  status   DispatchStatus  @default(QUEUED)
+  toTarget String // phone or email
+  language Language        @default(EN)
+  error    String?
+  sentAt   DateTime?
+
+  sentById String?
+  sentBy   User?   @relation(fields: [sentById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([billId, channel])
+  @@map("bill_dispatches")
+}
+
+// ─────────────────────────────────────────────────────────────
+// STOCK
+// ─────────────────────────────────────────────────────────────
+
+/// Append-only ledger of every stock change. `qty` is signed (+in / −out).
+model StockMovement {
+  id        String            @id @default(uuid())
+  productId String
+  product   Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type      StockMovementType
+
+  qty          Decimal @db.Decimal(14, 3)
+  balanceAfter Decimal @db.Decimal(14, 3)
+  /// Purchase/landed rate for STOCK_IN, sale rate for SALE — drives valuation.
+  rate         Decimal @default(0) @db.Decimal(14, 2)
+
+  billId String?
+  bill   Bill?   @relation(fields: [billId], references: [id], onDelete: SetNull)
+
+  reason      String?
+  supplierRef String?
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([productId, createdAt])
+  @@index([type, createdAt])
+  @@index([billId])
+  @@map("stock_movements")
+}
+
+// ─────────────────────────────────────────────────────────────
+// KHATA — CREDIT / DEBIT LEDGER
+// ─────────────────────────────────────────────────────────────
+
+/// Append-only per-customer ledger. debit raises outstanding, credit lowers it.
+model LedgerEntry {
+  id         String          @id @default(uuid())
+  customerId String
+  customer   Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type       LedgerEntryType
+
+  debit        Decimal @default(0) @db.Decimal(14, 2)
+  credit       Decimal @default(0) @db.Decimal(14, 2)
+  balanceAfter Decimal @db.Decimal(14, 2)
+
+  entryDate DateTime @default(now())
+  narration String?
+
+  billId    String?
+  bill      Bill?            @relation(fields: [billId], references: [id], onDelete: SetNull)
+  paymentId String?
+  payment   Payment?         @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  noteId    String?
+  note      CreditDebitNote? @relation(fields: [noteId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([customerId, entryDate])
+  @@index([billId])
+  @@map("ledger_entries")
+}
+
+model Payment {
+  id           String      @id @default(uuid())
+  receiptNumber String     @unique
+  customerId   String
+  customer     Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  amount       Decimal     @db.Decimal(14, 2)
+  mode         PaymentMode
+  reference    String? // UPI ref / cheque no / UTR
+  paymentDate  DateTime    @default(now())
+  notes        String?
+
+  receivedById String
+  receivedBy   User   @relation(fields: [receivedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  allocations   PaymentAllocation[]
+  ledgerEntries LedgerEntry[]
+
+  @@index([customerId, paymentDate])
+  @@index([paymentDate])
+  @@map("payments")
+}
+
+/// Splits one receipt across bills (FIFO by default) so ageing buckets stay exact.
+model PaymentAllocation {
+  id        String  @id @default(uuid())
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  billId    String
+  bill      Bill    @relation(fields: [billId], references: [id], onDelete: Cascade)
+  amount    Decimal @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+
+  @@unique([paymentId, billId])
+  @@index([billId])
+  @@map("payment_allocations")
+}
+
+model CreditDebitNote {
+  id         String   @id @default(uuid())
+  noteNumber String   @unique
+  type       NoteType
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  billId     String?
+  bill       Bill?    @relation(fields: [billId], references: [id], onDelete: SetNull)
+
+  amount   Decimal  @db.Decimal(14, 2)
+  reason   String
+  noteDate DateTime @default(now())
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  ledgerEntries LedgerEntry[]
+
+  @@index([customerId, noteDate])
+  @@map("credit_debit_notes")
+}
+
+// ─────────────────────────────────────────────────────────────
+// SHOP CONFIG / SECURITY
+// ─────────────────────────────────────────────────────────────
+
+/// Singleton row (id = "shop"). Powers PDF header, tax logic and defaults.
+model ShopSetting {
+  id          String @id @default("shop")
+  legalName   String @default("Sattadhar Textile")
+  displayName String @default("SATTADHAR TEXTILE")
+  gstin       String?
+  /// Shop state — the CGST+SGST vs IGST decision compares this to customer state.
+  state       String @default("Gujarat")
+  addressLine String?
+  city        String?
+  pincode     String?
+  phone       String?
+  email       String?
+  logoUrl     String?
+
+  bankName      String?
+  bankAccountNo String?
+  bankIfsc      String?
+  upiId         String?
+
+  invoiceTermsEn String?
+  invoiceTermsGu String?
+  defaultLanguage Language @default(EN)
+  roundOffEnabled Boolean  @default(true)
+  lowStockAlertEnabled Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("shop_settings")
+}
+
+model AuditLog {
+  id       String      @id @default(uuid())
+  userId   String?
+  user     User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action   AuditAction
+  entity   String // "Product" | "Bill" | ...
+  entityId String?
+
+  before Json?
+  after  Json?
+
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
