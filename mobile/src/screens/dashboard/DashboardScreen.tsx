@@ -441,10 +441,13 @@ function QuickActions({ isAdmin }: { isAdmin: boolean }) {
       emphasis: true,
     },
     {
-      key: 'addCustomer',
+      key: 'customers',
       icon: <UserPlus size={20} color={colors.primary} strokeWidth={ICON_STROKE} />,
-      label: t('dashboard.addCustomer'),
-      onPress: () => tabNavigation.navigate('Customers'),
+      // Was "Add customer" while the tab was a placeholder. The tab is a real
+      // list and khata now, and there is still no add form, so the tile says
+      // what it actually opens.
+      label: t('customers.title'),
+      onPress: () => tabNavigation.navigate('Customers', { screen: 'CustomersList' }),
     },
   ];
 

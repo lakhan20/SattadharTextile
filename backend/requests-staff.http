@@ -1,0 +1,181 @@
+### Sattadhar Textile — Staff accounts & menu assignment
+### VS Code "REST Client" extension (humao.rest-client). Run top to bottom.
+###
+### The point of this file is the SAFETY RAILS block (steps 9–14): watch the
+### server refuse an owner-only menu key, refuse a staff token on an owner-only
+### report, refuse deactivating the last owner, and refuse an owner switching
+### off the account they are signed in with.
+
+@base = http://localhost:4000
+@api = {{base}}/api/v1
+
+### ─── 1. Login as ADMIN ─────────────────────────────────────────────────
+# @name adminLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "admin", "password": "ChangeMe@123" }
+
+###
+@adminAccess = {{adminLogin.response.body.data.accessToken}}
+@adminId = {{adminLogin.response.body.data.user.id}}
+
+### ─── 2. What may be assigned, and what never can ───────────────────────
+### `adminOnlyMenus` is the list the staff form never renders.
+GET {{api}}/admin/staff/options
+Authorization: Bearer {{adminAccess}}
+
+### ─── 3. Create a staff member with ONLY Billing + Customers ────────────
+### Deliberately narrow: no Dashboard, no Products, no Stock, no Khata.
+# @name createStaff
+POST {{api}}/admin/staff
+Authorization: Bearer {{adminAccess}}
+Content-Type: application/json
+
+{
+  "name": "Test Counter",
+  "username": "counter1",
+  "password": "Counter@2026",
+  "role": "STAFF",
+  "preferredLang": "EN",
+  "maxDiscountPercent": 2,
+  "permissions": { "customer.create": true, "payment.record": true },
+  "menuAccess": ["BILLING", "CUSTOMERS"]
+}
+
+###
+@staffId = {{createStaff.response.body.data.id}}
+
+### ─── 4. Sign in as that staff member ───────────────────────────────────
+# @name staffLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "counter1", "password": "Counter@2026" }
+
+###
+@staffAccess = {{staffLogin.response.body.data.accessToken}}
+
+### ─── 5. Their effective menu — expect exactly BILLING + CUSTOMERS ──────
+GET {{api}}/me/menu
+Authorization: Bearer {{staffAccess}}
+
+### ─── 6. The owner's own menu — expect the full set incl. REPORTS/STAFF ─
+GET {{api}}/me/menu
+Authorization: Bearer {{adminAccess}}
+
+### ─── 7. Give them Stock (view) as well ─────────────────────────────────
+PATCH {{api}}/admin/staff/{{staffId}}
+Authorization: Bearer {{adminAccess}}
+Content-Type: application/json
+
+{ "menuAccess": ["BILLING", "CUSTOMERS", "STOCK"] }
+
+### ─── 8. Re-check their menu — STOCK is now there ───────────────────────
+GET {{api}}/me/menu
+Authorization: Bearer {{staffAccess}}
+
+
+### ══ SAFETY RAILS ═══════════════════════════════════════════════════════
+
+### ─── 9. Try to assign an owner-only screen → 400 VALIDATION_ERROR ──────
+### This is the curl path the form can never take. The message names the reason.
+PATCH {{api}}/admin/staff/{{staffId}}
+Authorization: Bearer {{adminAccess}}
+Content-Type: application/json
+
+{ "menuAccess": ["BILLING", "REPORTS"] }
+
+### ─── 10. And stock valuation, and this very screen → 400 each ──────────
+PATCH {{api}}/admin/staff/{{staffId}}
+Authorization: Bearer {{adminAccess}}
+Content-Type: application/json
+
+{ "menuAccess": ["BILLING", "OUTSTANDING", "STAFF"] }
+
+### ─── 11. A key the app does not have at all → 400 ──────────────────────
+PATCH {{api}}/admin/staff/{{staffId}}
+Authorization: Bearer {{adminAccess}}
+Content-Type: application/json
+
+{ "menuAccess": ["STOCK_VALUATION"] }
+
+### ─── 12. Staff token on an owner-only report → 403, menus irrelevant ───
+### The menu never came into it. This is the actual boundary.
+GET {{api}}/reports/profit-margin
+Authorization: Bearer {{staffAccess}}
+
+### ─── 13. Staff token on stock valuation → 403 ──────────────────────────
+GET {{api}}/stock/valuation
+Authorization: Bearer {{staffAccess}}
+
+### ─── 14. Staff token on staff management itself → 403 ──────────────────
+GET {{api}}/admin/staff
+Authorization: Bearer {{staffAccess}}
+
+### ─── 15. Owner deactivating their own account → 403 ────────────────────
+POST {{api}}/admin/staff/{{adminId}}/deactivate
+Authorization: Bearer {{adminAccess}}
+
+### ─── 16. Demoting the last active owner → 409 CONFLICT ─────────────────
+PATCH {{api}}/admin/staff/{{adminId}}
+Authorization: Bearer {{adminAccess}}
+Content-Type: application/json
+
+{ "role": "STAFF" }
+
+### ─── 17. Username already taken → 409 CONFLICT ─────────────────────────
+POST {{api}}/admin/staff
+Authorization: Bearer {{adminAccess}}
+Content-Type: application/json
+
+{ "name": "Duplicate", "username": "counter1", "password": "Counter@2026" }
+
+### ─── 18. Khata without Customers → 400, it would be unreachable ────────
+PATCH {{api}}/admin/staff/{{staffId}}
+Authorization: Bearer {{adminAccess}}
+Content-Type: application/json
+
+{ "menuAccess": ["BILLING", "KHATA"] }
+
+
+### ══ DEACTIVATION & PASSWORD ════════════════════════════════════════════
+
+### ─── 19. Deactivate → revokedSessions tells you they were signed in ────
+POST {{api}}/admin/staff/{{staffId}}/deactivate
+Authorization: Bearer {{adminAccess}}
+
+### ─── 20. Their still-unexpired token → 401 immediately, not later ──────
+GET {{api}}/me/menu
+Authorization: Bearer {{staffAccess}}
+
+### ─── 21. Back on ───────────────────────────────────────────────────────
+POST {{api}}/admin/staff/{{staffId}}/activate
+Authorization: Bearer {{adminAccess}}
+
+### ─── 22. Reset their password ──────────────────────────────────────────
+POST {{api}}/admin/staff/{{staffId}}/reset-password
+Authorization: Bearer {{adminAccess}}
+Content-Type: application/json
+
+{ "newPassword": "Counter@2027" }
+
+### ─── 23. Old password → 401 INVALID_CREDENTIALS ────────────────────────
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "counter1", "password": "Counter@2026" }
+
+### ─── 24. New password → 200 ────────────────────────────────────────────
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "counter1", "password": "Counter@2027" }
+
+### ─── 25. Clear a lockout without touching the password ─────────────────
+POST {{api}}/admin/staff/{{staffId}}/unlock
+Authorization: Bearer {{adminAccess}}
+
+### ─── 26. The list, with the assignment on every row ────────────────────
+GET {{api}}/admin/staff?page=1&pageSize=20
+Authorization: Bearer {{adminAccess}}

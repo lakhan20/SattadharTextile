@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Share2, FileText } from 'lucide-react-native';
+import { History, Pencil, Share2, FileText } from 'lucide-react-native';
 import { AppHeader } from '../../components/AppHeader';
 import { Banner } from '../../components/Banner';
 import { Button } from '../../components/Button';
@@ -12,13 +13,14 @@ import { ApiError } from '../../api/client';
 import { billsApi } from '../../api/bills';
 import type { Bill } from '../../api/types';
 import { useApiError, type ReadableError } from '../../hooks/useApiError';
+import { useHasPermission } from '../../store/authStore';
 import { ICON_STROKE, colors, radius, spacing, tabularNumbers, type } from '../../theme';
 import { shareBillPdf } from '../../utils/billPdf';
 import { formatMoney, formatQty } from '../../utils/money';
-import type { BillingStackParamList } from '../../navigation/types';
+import type { BillRoutes } from '../../navigation/types';
 import { BillModeBadge } from './BillModeBadge';
 
-type Props = NativeStackScreenProps<BillingStackParamList, 'BillDetail'>;
+type Props = NativeStackScreenProps<BillRoutes, 'BillDetail'>;
 
 function AmountRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
@@ -32,6 +34,7 @@ function AmountRow({ label, value, strong = false }: { label: string; value: str
 export function BillDetailScreen({ navigation, route }: Props) {
   const { t } = useTranslation();
   const readError = useApiError();
+  const canEdit = useHasPermission('bill.edit');
   const { billId } = route.params;
 
   const [bill, setBill] = useState<Bill | null>(null);
@@ -54,6 +57,14 @@ export function BillDetailScreen({ navigation, route }: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Coming back from an edit must not leave the old totals on screen — the
+  // bill in front of the customer would then disagree with the one on file.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
 
   async function handleSharePdf() {
     if (!bill) return;
@@ -103,6 +114,21 @@ export function BillDetailScreen({ navigation, route }: Props) {
 
         {bill ? (
           <>
+            {/* A revised bill announces itself. The customer may be holding a
+                printed copy of an earlier version, and the counter needs to
+                know that before an argument starts. */}
+            {bill.revisionCount > 0 ? (
+              <Banner
+                tone="warning"
+                title={t('bills.revisedTitle', { count: bill.revisionCount })}
+                body={
+                  bill.lastRevisedAt
+                    ? t('bills.revisedBody', { date: new Date(bill.lastRevisedAt).toLocaleString('en-IN') })
+                    : undefined
+                }
+              />
+            ) : null}
+
             <Card style={styles.summaryCard}>
               <View style={styles.summaryHeader}>
                 <View style={styles.summaryText}>
@@ -184,6 +210,28 @@ export function BillDetailScreen({ navigation, route }: Props) {
                 loading={sending}
                 icon={<Share2 size={18} color="#FFFFFF" strokeWidth={ICON_STROKE} />}
               />
+
+              {/* A cancelled bill is not corrected, it is replaced — so the
+                  edit route is simply absent rather than offered and refused. */}
+              {canEdit && bill.status === 'FINAL' ? (
+                <Button
+                  label={t('bills.edit')}
+                  onPress={() => navigation.navigate('BillEdit', { billId: bill.id })}
+                  variant="outline"
+                  icon={<Pencil size={18} color={colors.primary} strokeWidth={ICON_STROKE} />}
+                />
+              ) : null}
+
+              {bill.revisionCount > 0 ? (
+                <Button
+                  label={t('bills.editHistory')}
+                  onPress={() =>
+                    navigation.navigate('BillRevisions', { billId: bill.id, billNumber: bill.billNumber })
+                  }
+                  variant="outline"
+                  icon={<History size={18} color={colors.primary} strokeWidth={ICON_STROKE} />}
+                />
+              ) : null}
             </View>
           </>
         ) : null}

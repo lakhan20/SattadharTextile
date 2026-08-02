@@ -11,11 +11,122 @@ export const PERMISSION_KEYS = [
   'customer.create',
   'customer.update',
   'bill.cancel',
+  /** Rewrite an already-issued bill. Off by default — see the note on `UpdateBillInput`. */
+  'bill.edit',
   'payment.record',
   'ledger.view',
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
+
+/**
+ * ── Menu assignment ──────────────────────────────────────────
+ *
+ * Which SCREENS an account sees, as decided by the shop owner. Mirrors
+ * `backend/src/config/menus.ts`.
+ *
+ * This is not a permission and cannot be used as one. Hiding a tab is a
+ * courtesy to the person holding the phone; what actually stops a staff account
+ * reaching owner-only data is the 403 the server returns on those endpoints,
+ * which it returns whatever this list says. Two independent layers:
+ *
+ *   menuAccess  → can they GET TO the screen?   (this)
+ *   permissions → can they DO the thing on it?  (PERMISSION_KEYS above)
+ */
+export const STAFF_MENU_KEYS = [
+  'DASHBOARD',
+  'BILLING',
+  'PRODUCTS',
+  'CUSTOMERS',
+  'STOCK',
+  /** Reached from a customer's record, so it needs `CUSTOMERS` to be usable. */
+  'KHATA',
+] as const;
+
+/** Never assignable. The staff form does not offer these, and the API refuses them. */
+export const ADMIN_ONLY_MENU_KEYS = ['REPORTS', 'OUTSTANDING', 'STAFF'] as const;
+
+export type StaffMenuKey = (typeof STAFF_MENU_KEYS)[number];
+export type AdminMenuKey = (typeof ADMIN_ONLY_MENU_KEYS)[number];
+export type MenuKey = StaffMenuKey | AdminMenuKey;
+
+/** What `GET /me/menu` returns: the signed-in account's own effective screens. */
+export interface MyMenu {
+  role: Role;
+  menu: MenuKey[];
+}
+
+/**
+ * A staff account as the owner's management screens see it. There is no
+ * password field of any kind — the server never sends one.
+ */
+export interface StaffAccount {
+  id: string;
+  username: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  role: Role;
+  preferredLang: ServerLanguage;
+  permissions: Record<PermissionKey, boolean>;
+  /** What the owner ticked. Empty for an owner — their menu comes from the role. */
+  menuAccess: StaffMenuKey[];
+  /** What this account will actually see once signed in. */
+  effectiveMenu: MenuKey[];
+  maxDiscountPercent: number;
+  isActive: boolean;
+  isLocked: boolean;
+  lockedUntil: string | null;
+  failedLoginAttempts: number;
+  lastLoginAt: string | null;
+  passwordChangedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateStaffInput {
+  name: string;
+  username: string;
+  password: string;
+  role?: Role;
+  phone?: string;
+  email?: string;
+  preferredLang?: ServerLanguage;
+  maxDiscountPercent?: number;
+  permissions?: Partial<Record<PermissionKey, boolean>>;
+  /** Omit for the server's default (Dashboard, Billing, Customers). */
+  menuAccess?: StaffMenuKey[];
+}
+
+/**
+ * Everything an owner may change afterwards. The username is absent because it
+ * is how the account signs in and how it reads in the audit trail; the password
+ * is absent because that is `resetPassword`, which also ends their sessions.
+ */
+export interface UpdateStaffInput {
+  name?: string;
+  role?: Role;
+  phone?: string | null;
+  email?: string | null;
+  preferredLang?: ServerLanguage;
+  maxDiscountPercent?: number;
+  permissions?: Partial<Record<PermissionKey, boolean>>;
+  menuAccess?: StaffMenuKey[];
+}
+
+/** What the form is allowed to offer, straight from the server so the two cannot drift. */
+export interface StaffOptions {
+  assignableMenus: StaffMenuKey[];
+  adminOnlyMenus: AdminMenuKey[];
+  defaultMenus: StaffMenuKey[];
+  permissions: PermissionKey[];
+}
+
+export interface StaffStateChangeResult {
+  staff: StaffAccount;
+  /** Non-zero means somebody was signed in and has just been thrown out. */
+  revokedSessions: number;
+}
 
 export interface PublicUser {
   id: string;
@@ -70,6 +181,8 @@ export type ApiErrorCode =
   | 'ACCOUNT_LOCKED'
   | 'NOT_FOUND'
   | 'CONFLICT'
+  /** A credit sale would take the customer past their credit limit. */
+  | 'CREDIT_LIMIT_EXCEEDED'
   | 'RATE_LIMITED'
   | 'PAYLOAD_TOO_LARGE'
   | 'INTERNAL_ERROR'
@@ -179,6 +292,25 @@ export interface Customer {
   updatedAt: string;
 }
 
+export interface CreateCustomerInput {
+  name: string;
+  /** Any spelling — the server canonicalises to +91XXXXXXXXXX. */
+  phone: string;
+  email?: string;
+  gstin?: string;
+  addressLine?: string;
+  city?: string;
+  /** Drives CGST+SGST vs IGST on every bill. Defaults to Gujarat server-side. */
+  state?: string;
+  pincode?: string;
+  type?: CustomerType;
+  /** 0 means "no limit set", not "no credit allowed". */
+  creditLimit?: number;
+  /** Posted as an OPENING khata entry, not written straight onto the balance. */
+  openingBalance?: number;
+  notes?: string;
+}
+
 export interface LastPriceResponse {
   rate: number;
   qty: number;
@@ -214,6 +346,8 @@ export interface CreateBillInput {
   billDiscountValue?: number;
   notes?: string;
   lang?: 'en' | 'gu';
+  /** ADMIN only — the server ignores it for a STAFF token. */
+  overrideCreditLimit?: boolean;
   items: BillLineItemInput[];
 }
 
@@ -273,19 +407,86 @@ export interface Bill {
   paymentStatus: PaymentStatus;
   status: BillStatus;
   notes: string | null;
-  pdfPathEn: string | null;
-  pdfPathGu: string | null;
   createdById: string;
   createdAt: string;
   updatedAt: string;
+  /** 0 for a bill nobody has rewritten. Shown on the bill so an edit is never silent. */
+  revisionCount: number;
+  lastRevisedAt: string | null;
   items?: BillItem[];
   itemCount?: number;
+  /**
+   * Present only on the create response, and only when the sale carried a
+   * walk-in phone number: says whether that number was recognised as an
+   * existing customer or registered as a new one.
+   */
+  walkInCustomer?: { customerId: string; name: string; outcome: 'registered' | 'matched' };
+}
+
+/**
+ * Revising an issued bill.
+ *
+ * The bill number, date, billing mode and customer are deliberately absent —
+ * changing any of those is not a correction but a different document, so the
+ * server refuses them. What the counter actually gets wrong (a quantity, a
+ * rate, a line that should not be there, how it was paid) is here.
+ *
+ * `items` is the complete new line list, not a patch: the server replaces the
+ * lines and posts the stock difference as fresh movements.
+ */
+export interface UpdateBillInput {
+  /** Required by the server (min 3 chars) and stored on the revision. */
+  reason: string;
+  paymentMode?: PaymentMode;
+  /** Omit to keep whatever has already been received against this bill. */
+  paidAmount?: number;
+  billDiscountType?: DiscountType;
+  billDiscountValue?: number;
+  notes?: string;
+  /** ADMIN only — the server ignores it for a STAFF token. */
+  overrideCreditLimit?: boolean;
+  items: BillLineItemInput[];
+}
+
+/**
+ * What `GET /bills` returns. Beyond the page of bills it carries totals for
+ * the WHOLE filter — a footer that only added up the visible twenty would be
+ * quietly wrong on a busy day — and the IST dates actually queried.
+ */
+export interface BillsPage {
+  items: Bill[];
+  pagination: Pagination;
+  /** `FINAL` bills only: a cancelled bill is not a sale. */
+  summary: { billCount: number; grandTotal: number; paidTotal: number; dueTotal: number };
+  /** Null when no date filter was sent. */
+  range: { from: string; to: string } | null;
+}
+
+/** One "before → after" line in a revision, computed by the server at write time. */
+export interface BillChange {
+  field: string;
+  before: string;
+  after: string;
+}
+
+export interface BillRevision {
+  id: string;
+  billId: string;
+  billNumber: string;
+  /** 1 for the first edit. */
+  revision: number;
+  reason: string;
+  changes: BillChange[];
+  /** Signed: how much the grand total moved. */
+  amountDelta: number;
+  changedById: string;
+  changedByName: string;
+  createdAt: string;
 }
 
 export interface SendBillResult {
   whatsappUrl: string;
   message: string;
-  pdfPath: string;
 }
 
 // ── Stock ────────────────────────────────────────────────────
@@ -621,4 +822,131 @@ export interface ProfitMarginReport {
   };
   rows: ProfitRow[];
   lossMakers: ProfitRow[];
+}
+
+// ── Khata (credit ledger) ────────────────────────────────────
+//
+// `/ledger/outstanding` and `/ledger/ageing` return the same shapes as the
+// reports of the same name — they are literally the same service call behind
+// two URLs — so `OutstandingReport` and `AgeingReport` above are reused rather
+// than duplicated here.
+
+export type LedgerEntryType = 'OPENING' | 'CREDIT_SALE' | 'PAYMENT' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
+
+/** DEBIT raised what the customer owes; CREDIT lowered it. */
+export type LedgerDirection = 'DEBIT' | 'CREDIT';
+
+/** Money actually settled at the counter — narrower than `PaymentMode`. */
+export type ReceiptMode = 'CASH' | 'UPI' | 'BANK';
+
+export type NoteType = 'CREDIT' | 'DEBIT';
+
+export interface LedgerEntry {
+  id: string;
+  type: LedgerEntryType;
+  direction: LedgerDirection;
+  /** Always positive — the direction says which way it moved the balance. */
+  amount: number;
+  debit: number;
+  credit: number;
+  balanceAfter: number;
+  note: string | null;
+  paymentMode: PaymentMode | null;
+  billId: string | null;
+  billNumber: string | null;
+  paymentId: string | null;
+  receiptNumber: string | null;
+  noteId: string | null;
+  noteNumber: string | null;
+  entryDate: string;
+  createdAt: string;
+  createdById: string | null;
+  createdByName: string | null;
+}
+
+export interface KhataCustomer {
+  id: string;
+  name: string;
+  phone: string;
+  type: CustomerType;
+  creditLimit: number;
+  /** Negative means the shop is holding the customer's money. */
+  outstanding: number;
+  /** Null when no credit limit is set on the customer. */
+  availableCredit: number | null;
+  isActive: boolean;
+}
+
+export interface KhataStatement {
+  customer: KhataCustomer;
+  openingBalance: number;
+  /** Across the whole khata, not just the page in `entries`. */
+  totals: { debit: number; credit: number; entryCount: number };
+  entries: LedgerEntry[];
+  pagination: Pagination;
+  sort: 'asc' | 'desc';
+}
+
+export interface RecordPaymentInput {
+  customerId: string;
+  amount: number;
+  paymentMode: ReceiptMode;
+  note?: string;
+  /** Settle this bill first; the rest flows to older unpaid bills. */
+  refBillId?: string;
+}
+
+export interface PaymentAllocation {
+  billId: string;
+  billNumber: string;
+  billDate: string;
+  amount: number;
+  dueAfter: number;
+}
+
+export interface RecordPaymentResult {
+  paymentId: string;
+  receiptNumber: string;
+  customerId: string;
+  customerName: string;
+  amount: number;
+  paymentMode: PaymentMode;
+  balanceAfter: number;
+  previousBalance: number;
+  allocations: PaymentAllocation[];
+  /** Received but not against any open bill — an advance, or an opening balance. */
+  unallocated: number;
+  entry: LedgerEntry;
+}
+
+export interface RecordNoteInput {
+  customerId: string;
+  type: NoteType;
+  amount: number;
+  reason: string;
+  refBillId?: string;
+}
+
+export interface RecordNoteResult {
+  noteId: string;
+  noteNumber: string;
+  type: NoteType;
+  customerId: string;
+  customerName: string;
+  amount: number;
+  reason: string;
+  balanceAfter: number;
+  previousBalance: number;
+  billDueAfter: number | null;
+  entry: LedgerEntry;
+}
+
+export interface PaymentReminder {
+  customerId: string;
+  customerName: string;
+  phone: string;
+  outstanding: number;
+  message: string;
+  /** Opened with `Linking.openURL`. */
+  whatsappUrl: string;
 }

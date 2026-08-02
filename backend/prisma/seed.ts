@@ -1,5 +1,15 @@
 /* eslint-disable no-console */
-import { CustomerType, Language, PrismaClient, Role, StockMovementType, Unit } from '@prisma/client';
+import {
+  CustomerType,
+  Language,
+  LedgerEntryType,
+  PrismaClient,
+  Role,
+  StockMovementType,
+  Unit,
+} from '@prisma/client';
+import { DEFAULT_STAFF_MENUS, type StaffMenuKey } from '../src/config/menus';
+import { postLedgerEntry } from '../src/modules/ledger/ledger.posting';
 import bcrypt from 'bcryptjs';
 import 'dotenv/config';
 
@@ -30,6 +40,11 @@ interface SeedUser {
   language?: Language;
   maxDiscountPercent?: number;
   permissions?: Record<string, boolean>;
+  /**
+   * Which screens this account sees. Visibility only — never a permission, and
+   * never able to name an owner-only area. See `src/config/menus.ts`.
+   */
+  menuAccess?: StaffMenuKey[];
 }
 
 const users: SeedUser[] = [
@@ -56,6 +71,8 @@ const users: SeedUser[] = [
       'payment.record': true,
       'ledger.view': true,
     },
+    // Takes money on the khata, so she needs the book she takes it in.
+    menuAccess: ['DASHBOARD', 'BILLING', 'CUSTOMERS', 'KHATA'],
   },
   {
     username: 'jignesh',
@@ -72,6 +89,8 @@ const users: SeedUser[] = [
       'ledger.view': true,
       'stock.in': true,
     },
+    // He books goods in, so he gets the shelf and the catalog as well.
+    menuAccess: ['DASHBOARD', 'BILLING', 'PRODUCTS', 'CUSTOMERS', 'STOCK', 'KHATA'],
   },
   {
     username: 'meera',
@@ -85,6 +104,9 @@ const users: SeedUser[] = [
       'customer.create': true,
       'payment.record': true,
     },
+    // Counter only. Deliberately the narrowest account in the shop — this is
+    // what a staffer sees when the owner assigns almost nothing.
+    menuAccess: ['BILLING', 'CUSTOMERS'],
   },
 ];
 
@@ -370,10 +392,20 @@ interface SeedCustomer {
   state: string;
   pincode?: string;
   type: CustomerType;
+  /** 0 means "no limit set" — see `checkCreditLimit`. */
+  creditLimit: number;
+  /**
+   * Money already owed when the shop started using the app. Posted as an
+   * OPENING ledger entry rather than written straight onto `outstanding`, so
+   * the khata is complete from its very first line.
+   */
+  openingBalance?: number;
 }
 
 // One in Gujarat (same state as the shop → CGST+SGST) and one outside
 // (different state → IGST), so both tax paths can be tested immediately.
+// The third carries a balance from before the app, so the khata screens have
+// something to show without billing anything first.
 const customers: SeedCustomer[] = [
   {
     name: 'Chirag Mehta Textiles',
@@ -384,6 +416,7 @@ const customers: SeedCustomer[] = [
     state: 'Gujarat',
     pincode: '380001',
     type: CustomerType.WHOLESALE,
+    creditLimit: 100000,
   },
   {
     name: 'Rohan Traders',
@@ -393,20 +426,43 @@ const customers: SeedCustomer[] = [
     state: 'Maharashtra',
     pincode: '400007',
     type: CustomerType.RETAIL,
+    // Deliberately small: a couple of ordinary credit sales will trip the
+    // limit, so CREDIT_LIMIT_EXCEEDED is reachable without contriving one.
+    creditLimit: 5000,
+  },
+  {
+    name: 'Vasant Silk House',
+    phone: '+919820000003',
+    addressLine: 'Panchkuva Cloth Market',
+    city: 'Ahmedabad',
+    state: 'Gujarat',
+    pincode: '380002',
+    type: CustomerType.WHOLESALE,
+    creditLimit: 50000,
+    openingBalance: 12500,
   },
 ];
 
 async function seedCustomers(): Promise<void> {
   let created = 0;
   let skipped = 0;
+  let limitsBackfilled = 0;
 
   for (const c of customers) {
     const existing = await prisma.customer.findFirst({ where: { phone: c.phone, deletedAt: null } });
     if (existing) {
+      // The customer predates this seed, so it keeps its own data — but a
+      // credit limit of 0 means nothing was ever set, and the khata module
+      // needs one to be testable.
+      if (Number(existing.creditLimit) === 0 && c.creditLimit > 0) {
+        await prisma.customer.update({ where: { id: existing.id }, data: { creditLimit: c.creditLimit } });
+        limitsBackfilled++;
+      }
       skipped++;
       continue;
     }
-    await prisma.customer.create({
+
+    const customer = await prisma.customer.create({
       data: {
         name: c.name,
         phone: c.phone,
@@ -416,12 +472,32 @@ async function seedCustomers(): Promise<void> {
         state: c.state,
         pincode: c.pincode ?? null,
         type: c.type,
+        creditLimit: c.creditLimit,
+        openingBalance: c.openingBalance ?? 0,
       },
     });
+
+    // Through the same posting helper every other entry uses, so `outstanding`
+    // and the ledger cannot start out already disagreeing.
+    if (c.openingBalance && c.openingBalance > 0) {
+      await prisma.$transaction((tx) =>
+        postLedgerEntry(tx, {
+          customerId: customer.id,
+          type: LedgerEntryType.OPENING,
+          amount: c.openingBalance!,
+          narration: 'Opening balance carried into the app',
+          createdById: null,
+        }),
+      );
+    }
+
     created++;
   }
 
-  console.log(`Customers: ${created} created, ${skipped} already present.\n`);
+  console.log(
+    `Customers: ${created} created, ${skipped} already present` +
+      `${limitsBackfilled > 0 ? `, ${limitsBackfilled} credit limit(s) backfilled` : ''}.\n`,
+  );
 }
 
 async function main(): Promise<void> {
@@ -452,6 +528,8 @@ async function main(): Promise<void> {
         language: seed.language ?? Language.EN,
         maxDiscountPercent: seed.maxDiscountPercent ?? 0,
         permissions: seed.permissions ?? {},
+        // An owner's menu comes from the role, never from the column.
+        menuAccess: seed.role === Role.ADMIN ? [] : (seed.menuAccess ?? DEFAULT_STAFF_MENUS),
         isActive: true,
         passwordChangedAt: new Date(),
       },

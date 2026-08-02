@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { request, toApiError } from './client';
 import { API_PREFIX, stripTrailingSlash } from './config';
-import type { Envelope, HealthResponse, LoginResponse, PublicUser } from './types';
+import type { Envelope, HealthResponse, LoginResponse, MyMenu, PublicUser } from './types';
 
 export const authApi = {
   login: (username: string, password: string) =>
@@ -13,6 +13,13 @@ export const authApi = {
 
   me: () => request<PublicUser>({ method: 'GET', url: '/auth/me' }),
 
+  /**
+   * The screens this account may see, used to build the navigation. An owner
+   * always gets the full set; a staff account gets what the owner assigned,
+   * intersected server-side with what staff may ever see.
+   */
+  menu: () => request<MyMenu>({ method: 'GET', url: '/me/menu' }),
+
   logout: (allDevices = false) =>
     request<{ signedOut: boolean; revokedSessions: number }>({
       method: 'POST',
@@ -20,7 +27,11 @@ export const authApi = {
       data: { allDevices },
     }),
 
-  /** ADMIN only. Wired to the staff-accounts screen when that module lands. */
+  /**
+   * ADMIN only. The generic form of the reset. The staff screens call
+   * `staffApi.resetPassword` instead, which reaches the same service through
+   * `/admin/staff/:id/reset-password` and returns the updated account with it.
+   */
   adminResetPassword: (userId: string, newPassword: string) =>
     request<{ passwordReset: boolean; userId: string; username: string; revokedSessions: number }>({
       method: 'POST',

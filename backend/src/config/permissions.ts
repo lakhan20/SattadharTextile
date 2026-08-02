@@ -16,6 +16,7 @@ export const PERMISSIONS = [
   'customer.create',
   'customer.update',
   'bill.cancel', // cancel own bill (ADMIN can cancel any)
+  'bill.edit', // revise an already-issued bill (own bills only for STAFF)
   'payment.record', // accept a khata payment
   'ledger.view', // view customer outstanding / ageing
 ] as const;
@@ -34,6 +35,10 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<Permission, boolean> = {
   'customer.create': true,
   'customer.update': true,
   'bill.cancel': false,
+  // Off by default, deliberately. Rewriting an issued bill is the single
+  // easiest way to hide a mistake or a theft, so an owner should have to
+  // decide to allow it per account rather than discover it was on.
+  'bill.edit': false,
   'payment.record': true,
   'ledger.view': true,
 };

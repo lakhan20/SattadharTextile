@@ -1,0 +1,199 @@
+### Sattadhar Textile — Customers: registration + walk-in dedupe
+### VS Code "REST Client" extension (humao.rest-client). Run top to bottom.
+###
+### The point of this file is steps 5–9: the same person, reached four
+### different ways, must end up as exactly ONE customer record.
+
+@base = http://localhost:4000
+@api = {{base}}/api/v1
+
+### ─── 1. Login as ADMIN ─────────────────────────────────────────────────
+# @name adminLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "admin", "password": "ChangeMe@123" }
+
+###
+@adminAccess = {{adminLogin.response.body.data.accessToken}}
+
+### ─── 2. Login as STAFF ─────────────────────────────────────────────────
+### kirti is seeded with `customer.create` ON.
+# @name staffLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "kirti", "password": "Staff@123" }
+
+###
+@staffAccess = {{staffLogin.response.body.data.accessToken}}
+
+### ─── 3. Pick a product with stock — copy the id below ──────────────────
+GET {{api}}/products?pageSize=50
+Authorization: Bearer {{adminAccess}}
+
+###
+@productId = <PASTE_ANY_IN_STOCK_PRODUCT_ID>
+
+### Change this once per run so the test stays meaningful.
+@testPhone = 9812345670
+
+### ─── 4. Is the number free? ────────────────────────────────────────────
+### Expect 200 with "data": null. Not a 404 — "nobody has this" is an answer.
+GET {{api}}/customers/by-phone?phone={{testPhone}}
+Authorization: Bearer {{staffAccess}}
+
+### ─── 5. Register a customer (STAFF may) ────────────────────────────────
+### Note the response: `phone` comes back canonicalised to +91…
+# @name newCustomer
+POST {{api}}/customers
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{
+  "name": "Test Kirana Stores",
+  "phone": "{{testPhone}}",
+  "type": "RETAIL",
+  "city": "Ahmedabad",
+  "state": "Gujarat"
+}
+
+###
+@customerId = {{newCustomer.response.body.data.id}}
+
+### ─── 6. The same number, typed four ways — all refused ─────────────────
+### Every one expects 409 CONFLICT, and the message names who holds it.
+POST {{api}}/customers
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{ "name": "Duplicate 1", "phone": "{{testPhone}}" }
+
+###
+POST {{api}}/customers
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{ "name": "Duplicate 2", "phone": "+91{{testPhone}}" }
+
+###
+POST {{api}}/customers
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{ "name": "Duplicate 3", "phone": "91{{testPhone}}" }
+
+###
+### With a space in the middle, the way a phone is actually written down.
+POST {{api}}/customers
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{ "name": "Duplicate 4", "phone": "98123 45670" }
+
+### ─── 7. Walk-in with a NEW number → registers a customer ───────────────
+### Expect `walkInCustomer.outcome` = "registered" and a non-null customerId.
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{
+  "billingMode": "NON_GST",
+  "walkInName": "Raghav Counter Sale",
+  "walkInPhone": "9812345671",
+  "items": [{ "productId": "{{productId}}", "qty": 1 }]
+}
+
+### ─── 8. Same walk-in again, typed differently → NO duplicate ───────────
+### Expect `walkInCustomer.outcome` = "matched", and the SAME customerId.
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{
+  "billingMode": "NON_GST",
+  "walkInName": "Raghav (typed differently)",
+  "walkInPhone": "+91 98123 45671",
+  "items": [{ "productId": "{{productId}}", "qty": 1 }]
+}
+
+### ─── 9. One record, both sales ─────────────────────────────────────────
+### Expect exactly one customer, and two bills against them.
+GET {{api}}/customers?search=9812345671
+Authorization: Bearer {{adminAccess}}
+
+### ─── 10. A matched walk-in gets their REAL terms ───────────────────────
+### Chirag Mehta Textiles is WHOLESALE. Billing them through the walk-in
+### field must charge the wholesale rate, because the match runs BEFORE the
+### rates are worked out. Compare `items[0].rate` to the product's two rates.
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "billingMode": "GST",
+  "walkInName": "typed at the counter",
+  "walkInPhone": "+919820000001",
+  "items": [{ "productId": "{{productId}}", "qty": 1 }]
+}
+
+### ─── 11. A walk-in with NO phone stays anonymous ───────────────────────
+### Expect customerId null and no `walkInCustomer` key. There is nothing to
+### identify a passer-by with, and inventing a record helps nobody.
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{
+  "billingMode": "NON_GST",
+  "walkInName": "Passer-by",
+  "items": [{ "productId": "{{productId}}", "qty": 1 }]
+}
+
+### ─── 12. Credit to an unknown number is refused ────────────────────────
+### Expect 400. A freshly registered walk-in has creditLimit 0, which means
+### "no limit set" — allowing khata here would hand a stranger unlimited
+### credit. Register them properly first.
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "billingMode": "GST",
+  "walkInName": "Stranger",
+  "walkInPhone": "9333300099",
+  "paymentMode": "CREDIT",
+  "items": [{ "productId": "{{productId}}", "qty": 1 }]
+}
+
+### ─── 13. …but a RECOGNISED customer may buy on khata ───────────────────
+### Expect 201, with their own credit limit enforced.
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "billingMode": "GST",
+  "walkInName": "x",
+  "walkInPhone": "+919820000001",
+  "paymentMode": "CREDIT",
+  "items": [{ "productId": "{{productId}}", "qty": 1 }]
+}
+
+### ─── 14. A failed bill leaves no customer behind ───────────────────────
+### Expect 409 (not enough stock), then a null lookup: registration happens
+### inside the bill transaction, so it rolls back with it.
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "billingMode": "GST",
+  "walkInName": "Should Not Exist",
+  "walkInPhone": "9444400099",
+  "items": [{ "productId": "{{productId}}", "qty": 999999 }]
+}
+
+###
+GET {{api}}/customers/by-phone?phone=9444400099
+Authorization: Bearer {{adminAccess}}

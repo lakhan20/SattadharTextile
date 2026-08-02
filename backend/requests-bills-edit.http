@@ -1,0 +1,158 @@
+### Sattadhar Textile — Credit at the counter + bill editing with a paper trail
+### VS Code "REST Client" extension (humao.rest-client). Run top to bottom.
+###
+### Two things are being demonstrated:
+###   · a credit sale to a walk-in in ONE request — no detour through the
+###     customer form, which is what the counter complained about;
+###   · an edit that changes the bill without rewriting any ledger, and that
+###     an owner can see afterwards.
+
+@base = http://localhost:4000
+@api = {{base}}/api/v1
+
+### ─── 1. Login as ADMIN ─────────────────────────────────────────────────
+# @name adminLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "admin", "password": "ChangeMe@123" }
+
+###
+@adminAccess = {{adminLogin.response.body.data.accessToken}}
+
+### ─── 2. Login as STAFF ─────────────────────────────────────────────────
+### kirti is seeded WITHOUT `bill.edit` — step 6 must fail before step 7
+### turns it on. That failure is the point of running this in order.
+# @name staffLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "kirti", "password": "Staff@123" }
+
+###
+@staffAccess = {{staffLogin.response.body.data.accessToken}}
+
+### ─── 3. Pick a product with stock ──────────────────────────────────────
+# @name products
+GET {{api}}/products?pageSize=5
+Authorization: Bearer {{adminAccess}}
+
+###
+@productId = {{products.response.body.data.items[0].id}}
+
+### ─── 4. Credit sale to a walk-in, in one request ───────────────────────
+### No customerId. The phone number is enough: the customer is registered
+### inside this transaction and the ₹900 lands on their khata.
+###   → 201, walkInCustomer.outcome = "registered", dueAmount = 900
+# @name bill
+POST {{api}}/bills
+Authorization: Bearer {{staffAccess}}
+Content-Type: application/json
+
+{
+  "billingMode": "NON_GST",
+  "walkInName": "Raghav Bhai",
+  "walkInPhone": "98250 41122",
+  "paymentMode": "CREDIT",
+  "paidAmount": 100,
+  "items": [{ "productId": "{{productId}}", "qty": 5, "rate": 200 }]
+}
+
+###
+@billId = {{bill.response.body.data.id}}
+@customerId = {{bill.response.body.data.walkInCustomer.customerId}}
+
+### ─── 5. The khata already knows ────────────────────────────────────────
+###   → outstanding 900, one CREDIT_SALE entry
+GET {{api}}/ledger/customer/{{customerId}}
+Authorization: Bearer {{adminAccess}}
+
+### ─── 6. Staff tries to edit WITHOUT the permission ─────────────────────
+###   → 403 FORBIDDEN. Editing is off by default; rewriting a bill after it
+###     has been handed over is the easiest way to cover a mistake.
+PATCH {{api}}/bills/{{billId}}
+Authorization: Bearer {{staffAccess}}
+Content-Type: application/json
+
+{ "reason": "trying it on", "items": [{ "productId": "{{productId}}", "qty": 1, "rate": 200 }] }
+
+### ─── 7. Owner turns `bill.edit` on for that account ────────────────────
+### No API for this yet — do it in the app (More → Staff) or directly:
+###   UPDATE users SET permissions = permissions || '{"bill.edit": true}'
+###   WHERE username = 'kirti';
+### Then re-run step 2 to get a token carrying the new permission.
+
+### ─── 8. Now the edit lands ─────────────────────────────────────────────
+### Customer took 2 metres less. `items` is the complete new line list.
+###   → 200, grandTotal 600, paidAmount still 100, dueAmount 500,
+###     revisionCount 1, billNumber UNCHANGED
+PATCH {{api}}/bills/{{billId}}
+Authorization: Bearer {{staffAccess}}
+Content-Type: application/json
+
+{
+  "reason": "Customer took 2 metres less",
+  "items": [{ "productId": "{{productId}}", "qty": 3, "rate": 200 }]
+}
+
+### ─── 9. Stock came back as a NEW movement ──────────────────────────────
+###   → newest row is SALE_RETURN qty 2. The original SALE:-5 is untouched,
+###     so the product's history still replays exactly.
+GET {{api}}/stock/movements?productId={{productId}}&pageSize=5
+Authorization: Bearer {{adminAccess}}
+
+### ─── 10. The khata moved by a NEW entry ────────────────────────────────
+###   → newest is CREDIT_NOTE 400 @ balanceAfter 500, and the original
+###     CREDIT_SALE still says balanceAfter 900. Nothing was rewritten.
+GET {{api}}/ledger/customer/{{customerId}}?sort=desc
+Authorization: Bearer {{adminAccess}}
+
+### ─── 11. This bill's history ───────────────────────────────────────────
+###   → reason, amountDelta -400, changes[] naming the product and the
+###     quantity that moved, and who did it.
+GET {{api}}/bills/{{billId}}/revisions
+Authorization: Bearer {{staffAccess}}
+
+### ─── 12. Staff cannot read the shop-wide log ───────────────────────────
+###   → 403. "Who has been rewriting bills" is a supervision question, and a
+###     supervision report the supervised can read is not one.
+GET {{api}}/bills/revisions
+Authorization: Bearer {{staffAccess}}
+
+### ─── 13. The owner can ─────────────────────────────────────────────────
+###   → every edit across the shop, newest first. Add &changedById= to
+###     narrow it to one staff account.
+GET {{api}}/bills/revisions
+Authorization: Bearer {{adminAccess}}
+
+### ─── 14. Cannot revise below money already received ────────────────────
+###   → 400: "Rs 100.00 has already been received against this bill…
+###     Raise a credit note for the difference instead."
+PATCH {{api}}/bills/{{billId}}
+Authorization: Bearer {{staffAccess}}
+Content-Type: application/json
+
+{ "reason": "trying to go below what was paid", "items": [{ "productId": "{{productId}}", "qty": 1, "rate": 10 }] }
+
+### ─── 15. An edit needs a reason ────────────────────────────────────────
+###   → 400 VALIDATION_ERROR on `reason`. An unexplained edit reads as
+###     tampering, so the schema will not store one.
+PATCH {{api}}/bills/{{billId}}
+Authorization: Bearer {{staffAccess}}
+Content-Type: application/json
+
+{ "items": [{ "productId": "{{productId}}", "qty": 3, "rate": 200 }] }
+
+### ─── 16. The same number again is MATCHED, not duplicated ──────────────
+###   → walkInCustomer.outcome = "matched", same customerId as step 4
+POST {{api}}/bills
+Authorization: Bearer {{staffAccess}}
+Content-Type: application/json
+
+{
+  "billingMode": "NON_GST",
+  "walkInName": "Raghav Bhai",
+  "walkInPhone": "+919825041122",
+  "paymentMode": "CASH",
+  "items": [{ "productId": "{{productId}}", "qty": 1, "rate": 200 }]
+}

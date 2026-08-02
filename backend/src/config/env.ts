@@ -27,7 +27,6 @@ const envSchema = z.object({
 
   UPLOAD_DIR: z.string().default('./uploads'),
   MAX_UPLOAD_MB: z.coerce.number().int().positive().default(5),
-  INVOICE_DIR: z.string().default('./invoices'),
 
   // Shop defaults — seeded into shop_settings on first boot only (see prisma/seed.ts).
   SHOP_NAME: z.string().default('Sattadhar Textile'),

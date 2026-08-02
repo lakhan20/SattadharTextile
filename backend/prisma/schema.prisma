@@ -87,9 +87,12 @@ enum StockMovementType {
   BILL_CANCELLED
 }
 
+/// Direction is implied by the type, never by the sign of a stored number:
+/// OPENING, CREDIT_SALE and DEBIT_NOTE raise what the customer owes;
+/// PAYMENT and CREDIT_NOTE lower it. See `ledger.posting.ts`.
 enum LedgerEntryType {
   OPENING
-  SALE
+  CREDIT_SALE
   PAYMENT
   CREDIT_NOTE
   DEBIT_NOTE
@@ -151,6 +154,16 @@ model User {
   // Never widens beyond what the role allows — only narrows.
   permissions Json @default("{}")
 
+  /// Which screens this account may SEE — a json array of menu keys, e.g.
+  /// ["DASHBOARD","BILLING","CUSTOMERS"]. See `config/menus.ts`.
+  ///
+  /// Visibility only. It hides screens inside what the role already permits and
+  /// can never reveal an owner-only one: the assignable set contains no
+  /// owner-only key, the API rejects anything outside it, and every owner-only
+  /// endpoint is still gated by `requireRole(ADMIN)` server-side. Ignored
+  /// entirely for an ADMIN, who always gets the full menu.
+  menuAccess Json @default("[]")
+
   // 5-attempt lockout
   failedLoginAttempts Int       @default(0)
   lockedUntil         DateTime?
@@ -168,9 +181,11 @@ model User {
   refreshTokens   RefreshToken[]
   bills           Bill[]          @relation("BillCreatedBy")
   cancelledBills  Bill[]          @relation("BillCancelledBy")
+  billRevisions   BillRevision[]  @relation("BillRevisedBy")
   stockMovements  StockMovement[]
   payments        Payment[]
   notes           CreditDebitNote[]
+  ledgerEntries   LedgerEntry[]
   auditLogs       AuditLog[]
   dispatches      BillDispatch[]
 
@@ -389,6 +404,23 @@ model NumberSeries {
   @@map("number_series")
 }
 
+/// Counters for every numbered document that is not a bill — receipts (RCPT),
+/// credit notes (CN), debit notes (DN). Bills keep `number_series` because
+/// their counter is per billing mode, which nothing else needs.
+model DocSeries {
+  id         String @id @default(uuid())
+  /// "RCPT" | "CN" | "DN"
+  kind       String
+  fy         String
+  lastNumber Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([kind, fy])
+  @@map("doc_series")
+}
+
 model Bill {
   id          String      @id @default(uuid())
   billNumber  String      @unique // FY26/T/00001 | FY26/E/00001
@@ -437,9 +469,13 @@ model Bill {
   notes        String?
   cancelReason String?
 
-  // PDFs are generated per language; both may coexist.
-  pdfPathEn String?
-  pdfPathGu String?
+  /// How many times this bill has been revised after being issued. 0 for most.
+  revisionCount Int       @default(0)
+  lastRevisedAt DateTime?
+
+  // No PDF columns: invoices are rendered on demand from this row (see
+  // src/pdf/invoice.pdf.ts) rather than stored, so nothing here can go stale
+  // and the disk does not grow with every sale.
 
   createdById   String
   createdBy     User      @relation("BillCreatedBy", fields: [createdById], references: [id])
@@ -456,6 +492,7 @@ model Bill {
   allocations    PaymentAllocation[]
   notesIssued    CreditDebitNote[]
   dispatches     BillDispatch[]
+  revisions      BillRevision[]
 
   @@index([billDate])
   @@index([createdById, billDate]) // STAFF "own bills only" queries
@@ -505,6 +542,44 @@ model BillItem {
   @@index([billId])
   @@index([productId, createdAt]) // product-wise sales
   @@map("bill_items")
+}
+
+/// Append-only record of every edit made to a bill after it was issued.
+///
+/// A bill is a document the shop has already handed to a customer, so changing
+/// one is an event in its own right — not a silent overwrite. Each revision
+/// keeps the complete before and after, a required reason, and who did it, so
+/// the owner can answer "who changed this, when, and what did they change?"
+/// without reconstructing it from the audit log.
+model BillRevision {
+  id       String @id @default(uuid())
+  billId   String
+  bill     Bill   @relation(fields: [billId], references: [id], onDelete: Cascade)
+  /// 1 for the first edit, 2 for the second, and so on.
+  revision Int
+
+  /// Required. An edit with no stated reason is indistinguishable from tampering.
+  reason String
+
+  /// Full snapshots — the bill and its lines, as they were and as they became.
+  before Json
+  after  Json
+  /// Human-readable summary of what actually moved, built at write time.
+  changes Json
+
+  /// grandTotal after − before. Positive means the customer owes more.
+  amountDelta Decimal @db.Decimal(14, 2)
+
+  changedById String
+  changedBy   User   @relation("BillRevisedBy", fields: [changedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([billId, revision])
+  @@index([billId])
+  @@index([changedById, createdAt])
+  @@index([createdAt])
+  @@map("bill_revisions")
 }
 
 /// Delivery log for WhatsApp / Email / SMS.
@@ -566,6 +641,11 @@ model StockMovement {
 // ─────────────────────────────────────────────────────────────
 
 /// Append-only per-customer ledger. debit raises outstanding, credit lowers it.
+///
+/// Exactly one of `debit`/`credit` carries the amount on any row — which one is
+/// decided by `type`, so a row can never contradict itself. `balanceAfter` is
+/// the value Postgres actually committed to `customers.outstanding` in the same
+/// transaction, never a figure this process computed from a stale read.
 model LedgerEntry {
   id         String          @id @default(uuid())
   customerId String
@@ -579,6 +659,10 @@ model LedgerEntry {
   entryDate DateTime @default(now())
   narration String?
 
+  /// Set on PAYMENT rows only, so a statement reads "Cash" / "UPI" / "Bank"
+  /// without joining through `payments`.
+  paymentMode PaymentMode?
+
   billId    String?
   bill      Bill?            @relation(fields: [billId], references: [id], onDelete: SetNull)
   paymentId String?
@@ -586,9 +670,15 @@ model LedgerEntry {
   noteId    String?
   note      CreditDebitNote? @relation(fields: [noteId], references: [id], onDelete: SetNull)
 
+  /// Null on rows written before this column existed, and on any future
+  /// system-generated entry with no human behind it.
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
 
   @@index([customerId, entryDate])
+  @@index([customerId, createdAt])
   @@index([billId])
   @@map("ledger_entries")
 }

@@ -26,17 +26,19 @@ import type {
   BillingMode,
   Customer,
   DiscountType,
+  PaymentMode,
   Product,
   TaxType,
 } from '../../api/types';
 import { useApiError, type ReadableError } from '../../hooks/useApiError';
-import { useAuthStore } from '../../store/authStore';
+import { useAuthStore, useIsAdmin } from '../../store/authStore';
 import { ICON_STROKE, TAP_TARGET, colors, radius, spacing, tabularNumbers, type } from '../../theme';
 import { previewBill } from '../../utils/billCalc';
 import { formatMoney } from '../../utils/money';
 import type { BillingStackParamList } from '../../navigation/types';
 import { BillLineRow, type BillLine } from './BillLineRow';
 import { CustomerPickerSheet } from './CustomerPickerSheet';
+import { PaymentPanel } from './PaymentPanel';
 import { ProductPickerSheet } from './ProductPickerSheet';
 import { TotalDock } from './TotalDock';
 
@@ -53,6 +55,7 @@ export function BillingScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const readError = useApiError();
   const maxDiscountPercent = useAuthStore((s) => s.user?.maxDiscountPercent ?? 0);
+  const isAdmin = useIsAdmin();
 
   const [billingMode, setBillingMode] = useState<BillingMode>('GST');
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -61,6 +64,10 @@ export function BillingScreen({ navigation }: Props) {
   const [lines, setLines] = useState<BillLine[]>([]);
   const [billDiscountType, setBillDiscountType] = useState<DiscountType>('PERCENT');
   const [billDiscountText, setBillDiscountText] = useState('');
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('CASH');
+  const [paidText, setPaidText] = useState('');
+  /** Set only after the server refuses a credit sale and an owner chooses to go ahead. */
+  const [overrideCreditLimit, setOverrideCreditLimit] = useState(false);
 
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
@@ -89,6 +96,20 @@ export function BillingScreen({ navigation }: Props) {
   const walkInReady = customer !== null || walkInName.trim().length > 0;
   const canGenerate = hasLines && walkInReady && !overDiscountCap && !createdBill;
 
+  /**
+   * A khata sale needs someone to chase. A saved customer obviously qualifies;
+   * so does a walk-in who left a number, because the server registers them as
+   * a customer inside the same transaction that writes the bill.
+   */
+  const creditAllowed = customer !== null || walkInPhone.trim().length > 0;
+
+  /**
+   * Derived rather than corrected in an effect: clearing the phone on a bill
+   * already marked CREDIT falls back to CASH immediately, and the state can
+   * never sit in a combination the server would reject.
+   */
+  const effectiveMode: PaymentMode = paymentMode === 'CREDIT' && !creditAllowed ? 'CASH' : paymentMode;
+
   const isDirty = hasLines || customer !== null || walkInName.trim().length > 0;
 
   function resetBill() {
@@ -98,6 +119,9 @@ export function BillingScreen({ navigation }: Props) {
     setWalkInPhone('');
     setBillDiscountText('');
     setBillDiscountType('PERCENT');
+    setPaymentMode('CASH');
+    setPaidText('');
+    setOverrideCreditLimit(false);
     setCreatedBill(null);
     setFailure(null);
     setServerMessage(null);
@@ -179,7 +203,7 @@ export function BillingScreen({ navigation }: Props) {
     [t],
   );
 
-  async function handleGenerate() {
+  async function handleGenerate(override = overrideCreditLimit) {
     if (!canGenerate) return;
     setGenerating(true);
     setFailure(null);
@@ -192,6 +216,12 @@ export function BillingScreen({ navigation }: Props) {
           : { walkInName: walkInName.trim(), ...(walkInPhone.trim() ? { walkInPhone: walkInPhone.trim() } : null) }),
         billDiscountType,
         billDiscountValue,
+        paymentMode: effectiveMode,
+        // Blank means "the default for this mode" — the whole amount for a
+        // settled sale, nothing for a khata one. Sending a computed number
+        // here would silently disagree with the server's own rounding.
+        ...(paidText.trim() === '' ? null : { paidAmount: Number(paidText) || 0 }),
+        ...(override ? { overrideCreditLimit: true } : null),
         items: lines.map((line) => ({
           productId: line.productId,
           qty: line.qty,
@@ -201,12 +231,29 @@ export function BillingScreen({ navigation }: Props) {
         })),
       });
       setCreatedBill(bill);
+      setOverrideCreditLimit(false);
     } catch (error) {
       // The lines stay on screen so a stock or discount failure can be fixed
       // and retried without re-entering the bill.
       if (error instanceof ApiError) {
         setServerMessage(error.message);
         setFailure(readError(error));
+        // An owner may sell past a customer's limit; a staff member may not,
+        // and the server would refuse the retry anyway — so only offer it to
+        // an owner rather than dangling a button that always fails.
+        if (error.code === 'CREDIT_LIMIT_EXCEEDED' && isAdmin) {
+          Alert.alert(t('billing.creditLimitTitle'), error.message, [
+            { text: t('common.cancel'), style: 'cancel' },
+            {
+              text: t('billing.sellAnyway'),
+              style: 'destructive',
+              onPress: () => {
+                setOverrideCreditLimit(true);
+                void handleGenerate(true);
+              },
+            },
+          ]);
+        }
       } else {
         setFailure(readError(error));
       }
@@ -321,9 +368,19 @@ export function BillingScreen({ navigation }: Props) {
 
               {createdBill ? (
                 <Banner
-                  tone="success"
+                  // A part-paid or khata bill is not the same good news as a
+                  // settled one, and the counter should see which it was
+                  // before the customer walks away.
+                  tone={createdBill.dueAmount > 0 ? 'warning' : 'success'}
                   title={t('billing.createdTitle', { number: createdBill.billNumber })}
-                  body={t('billing.createdBody', { total: formatMoney(createdBill.grandTotal) })}
+                  body={
+                    createdBill.dueAmount > 0
+                      ? t('billing.createdBodyDue', {
+                          total: formatMoney(createdBill.grandTotal),
+                          due: formatMoney(createdBill.dueAmount),
+                        })
+                      : t('billing.createdBody', { total: formatMoney(createdBill.grandTotal) })
+                  }
                 />
               ) : null}
 
@@ -384,6 +441,40 @@ export function BillingScreen({ navigation }: Props) {
                     </Pressable>
                   </View>
                 </Card>
+              ) : null}
+
+              {/* How the bill is settled, chosen where the money changes hands.
+                  Before this lived here, a khata sale meant leaving billing,
+                  registering the customer, coming back, and re-entering the
+                  lines — the long way round the shopkeeper complained about. */}
+              {hasLines && !createdBill ? (
+                <Card style={styles.paymentCard}>
+                  <PaymentPanel
+                    mode={effectiveMode}
+                    onModeChange={setPaymentMode}
+                    paidText={paidText}
+                    onPaidChange={setPaidText}
+                    grandTotal={preview.grandTotal}
+                    creditAllowed={creditAllowed}
+                    creditBlockedReason={t('billing.creditNeedsPhone')}
+                  />
+                </Card>
+              ) : null}
+
+              {/* A walk-in who left a number is now either recognised or
+                  registered. Saying which — and naming them — is the only way
+                  the counter learns that the customer list is being kept up,
+                  rather than wondering why the same person keeps appearing. */}
+              {createdBill?.walkInCustomer ? (
+                <Banner
+                  tone="success"
+                  title={
+                    createdBill.walkInCustomer.outcome === 'registered'
+                      ? t('billing.walkInRegistered', { name: createdBill.walkInCustomer.name })
+                      : t('billing.walkInMatched', { name: createdBill.walkInCustomer.name })
+                  }
+                  body={t('billing.walkInCustomerBody')}
+                />
               ) : null}
 
               {createdBill ? (
@@ -566,6 +657,7 @@ const styles = StyleSheet.create({
 
   walkInFields: { flexDirection: 'row', gap: spacing.md },
 
+  paymentCard: { gap: spacing.sm },
   billDiscountCard: { gap: spacing.sm },
   billDiscountLabel: { ...type.caption, color: colors.muted, textTransform: 'uppercase' },
   billDiscountInput: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

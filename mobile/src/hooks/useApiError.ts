@@ -36,7 +36,20 @@ const COPY_BY_CODE: Partial<Record<ApiErrorCode, { title: string; body?: string 
   NOT_FOUND: { title: 'errors.notFound', body: 'errors.notFoundBody' },
 
   CONFLICT: { title: 'errors.conflict', body: 'errors.conflictBody' },
+
+  // The server's message names the three figures the shopkeeper needs — what
+  // is already owed, what the sale would make it, and the limit — so this one
+  // deliberately keeps the server's prose instead of replacing it. See
+  // `useApiError`'s `serverMessage` branch below.
+  CREDIT_LIMIT_EXCEEDED: { title: 'errors.creditLimit', body: 'errors.creditLimitBody' },
 };
+
+/**
+ * Codes where the server's own sentence carries figures the app cannot
+ * reconstruct, so it is shown verbatim rather than replaced by a translated
+ * generic. Everything else switches on the code, as usual.
+ */
+const KEEP_SERVER_MESSAGE = new Set<ApiErrorCode>(['CREDIT_LIMIT_EXCEEDED']);
 
 export interface ReadableError {
   title: string;
@@ -54,6 +67,15 @@ export function useApiError() {
       const apiError = error instanceof ApiError ? error : null;
       const code: ApiErrorCode = apiError?.code ?? 'INTERNAL_ERROR';
       const copy = COPY_BY_CODE[code];
+
+      if (apiError && KEEP_SERVER_MESSAGE.has(code) && apiError.message) {
+        return {
+          code,
+          isOffline: false,
+          title: copy ? t(copy.title) : t('errors.unknown'),
+          body: apiError.message,
+        };
+      }
 
       return {
         code,

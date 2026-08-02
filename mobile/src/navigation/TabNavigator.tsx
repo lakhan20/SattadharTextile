@@ -4,19 +4,37 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { LayoutGrid, MoreHorizontal, Package, Receipt, Users } from 'lucide-react-native';
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
-import { CustomersScreen } from '../screens/ModulePlaceholder';
 import { MoreScreen } from '../screens/settings/MoreScreen';
+import { useMenu } from '../store/authStore';
 import { ICON_STROKE, colors, fonts } from '../theme';
 import { BillingStackNavigator } from './BillingStackNavigator';
+import { CustomersStackNavigator } from './CustomersStackNavigator';
 import { ProductsStackNavigator } from './ProductsStackNavigator';
 import type { TabParamList } from './types';
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
-/** Mulberry marks the active tab — the only place the accent appears in the chrome. */
+/**
+ * The bottom bar, built from the account's assigned menu.
+ *
+ * A staffer given only Billing and Customers gets exactly two tabs plus More —
+ * the others are not rendered disabled, they are not registered at all, so
+ * there is no route to reach by deep link or a stale back-stack entry. An owner
+ * always gets the full set, because `/me/menu` returns everything for ADMIN.
+ *
+ * This is about keeping the bar honest and uncluttered, not about security:
+ * the server refuses owner-only endpoints for a staff token whatever tabs the
+ * app happens to have drawn.
+ *
+ * More is always present. Sign-out, the language choice and the server address
+ * live there, and an account that could not reach them would be stuck.
+ *
+ * Mulberry marks the active tab — the only place the accent appears in the chrome.
+ */
 export function TabNavigator({ onOpenServer }: { onOpenServer: () => void }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const menu = useMenu();
 
   return (
     <Tab.Navigator
@@ -46,46 +64,58 @@ export function TabNavigator({ onOpenServer }: { onOpenServer: () => void }) {
         tabBarItemStyle: { paddingVertical: 2, paddingHorizontal: 0 },
       }}
     >
-      <Tab.Screen
-        name="Dashboard"
-        component={DashboardScreen}
-        options={{
-          title: t('tabs.dashboard'),
-          tabBarIcon: ({ color, focused }) => (
-            <LayoutGrid size={22} color={color} strokeWidth={focused ? 2.4 : ICON_STROKE} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Billing"
-        component={BillingStackNavigator}
-        options={{
-          title: t('tabs.billing'),
-          tabBarIcon: ({ color, focused }) => (
-            <Receipt size={22} color={color} strokeWidth={focused ? 2.4 : ICON_STROKE} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Products"
-        component={ProductsStackNavigator}
-        options={{
-          title: t('tabs.products'),
-          tabBarIcon: ({ color, focused }) => (
-            <Package size={22} color={color} strokeWidth={focused ? 2.4 : ICON_STROKE} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Customers"
-        component={CustomersScreen}
-        options={{
-          title: t('tabs.customers'),
-          tabBarIcon: ({ color, focused }) => (
-            <Users size={22} color={color} strokeWidth={focused ? 2.4 : ICON_STROKE} />
-          ),
-        }}
-      />
+      {menu.includes('DASHBOARD') ? (
+        <Tab.Screen
+          name="Dashboard"
+          component={DashboardScreen}
+          options={{
+            title: t('tabs.dashboard'),
+            tabBarIcon: ({ color, focused }) => (
+              <LayoutGrid size={22} color={color} strokeWidth={focused ? 2.4 : ICON_STROKE} />
+            ),
+          }}
+        />
+      ) : null}
+
+      {menu.includes('BILLING') ? (
+        <Tab.Screen
+          name="Billing"
+          component={BillingStackNavigator}
+          options={{
+            title: t('tabs.billing'),
+            tabBarIcon: ({ color, focused }) => (
+              <Receipt size={22} color={color} strokeWidth={focused ? 2.4 : ICON_STROKE} />
+            ),
+          }}
+        />
+      ) : null}
+
+      {menu.includes('PRODUCTS') ? (
+        <Tab.Screen
+          name="Products"
+          component={ProductsStackNavigator}
+          options={{
+            title: t('tabs.products'),
+            tabBarIcon: ({ color, focused }) => (
+              <Package size={22} color={color} strokeWidth={focused ? 2.4 : ICON_STROKE} />
+            ),
+          }}
+        />
+      ) : null}
+
+      {menu.includes('CUSTOMERS') ? (
+        <Tab.Screen
+          name="Customers"
+          component={CustomersStackNavigator}
+          options={{
+            title: t('tabs.customers'),
+            tabBarIcon: ({ color, focused }) => (
+              <Users size={22} color={color} strokeWidth={focused ? 2.4 : ICON_STROKE} />
+            ),
+          }}
+        />
+      ) : null}
+
       <Tab.Screen
         name="More"
         options={{

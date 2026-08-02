@@ -16,6 +16,9 @@ export interface FakeDb {
   products: Row[];
   /** Exports read the shop header from here. */
   shopSettings: Row[];
+  /** The khata statement reads both of these through the query builder. */
+  customers: Row[];
+  ledgerEntries: Row[];
 }
 
 export const db: FakeDb = {
@@ -24,6 +27,8 @@ export const db: FakeDb = {
   auditLogs: [],
   products: [],
   shopSettings: [],
+  customers: [],
+  ledgerEntries: [],
 };
 
 export function resetDb(): void {
@@ -32,6 +37,8 @@ export function resetDb(): void {
   db.auditLogs = [];
   db.products = [];
   db.shopSettings = [];
+  db.customers = [];
+  db.ledgerEntries = [];
 }
 
 const toTime = (v: unknown): number =>
@@ -108,6 +115,7 @@ export const fakePrisma = {
     email: null,
     language: 'EN',
     permissions: {},
+    menuAccess: [],
     maxDiscountPercent: 0,
     isActive: true,
     deletedAt: null,
@@ -160,6 +168,47 @@ export const fakePrisma = {
     updatedAt: new Date(),
   })),
 
+  customer: makeDelegate('customers', () => ({
+    id: `customer-${db.customers.length + 1}`,
+    email: null,
+    gstin: null,
+    addressLine: null,
+    city: null,
+    state: 'Gujarat',
+    pincode: null,
+    type: 'RETAIL',
+    creditLimit: 0,
+    openingBalance: 0,
+    outstanding: 0,
+    isActive: true,
+    notes: null,
+    deletedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  })),
+
+  ledgerEntry: {
+    ...makeDelegate('ledgerEntries', () => ({
+      id: `ledger-${db.ledgerEntries.length + 1}`,
+      debit: 0,
+      credit: 0,
+      narration: null,
+      paymentMode: null,
+      billId: null,
+      paymentId: null,
+      noteId: null,
+      createdById: null,
+      entryDate: new Date(),
+      createdAt: new Date(),
+    })),
+    /** Only the shape the statement asks for: summed debit/credit and a count. */
+    aggregate: async (args?: FindArgs) => {
+      const rows = db.ledgerEntries.filter((r) => matches(r, args?.where));
+      const sum = (key: string) => rows.reduce((acc, r) => acc + Number(r[key] ?? 0), 0);
+      return { _sum: { debit: sum('debit'), credit: sum('credit') }, _count: rows.length };
+    },
+  },
+
   $queryRaw: async () => [{ '?column?': 1 }],
   $connect: async () => undefined,
   $disconnect: async () => undefined,
@@ -171,6 +220,33 @@ export const fakePrisma = {
   },
 };
 
+/** Convenience for tests: insert a customer row directly. */
+export function seedCustomer(row: Row): Row {
+  const customer: Row = {
+    id: `customer-${db.customers.length + 1}`,
+    name: 'Test Customer',
+    phone: '+919820000099',
+    email: null,
+    gstin: null,
+    addressLine: null,
+    city: null,
+    state: 'Gujarat',
+    pincode: null,
+    type: 'RETAIL',
+    creditLimit: 0,
+    openingBalance: 0,
+    outstanding: 0,
+    isActive: true,
+    notes: null,
+    deletedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...row,
+  };
+  db.customers.push(customer);
+  return customer;
+}
+
 /** Convenience for tests: insert a user row directly. */
 export function seedUser(row: Row): Row {
   const user: Row = {
@@ -180,6 +256,7 @@ export function seedUser(row: Row): Row {
     role: 'STAFF',
     language: 'EN',
     permissions: {},
+    menuAccess: [],
     maxDiscountPercent: 0,
     isActive: true,
     deletedAt: null,

@@ -8,6 +8,7 @@ import { ServerScreen } from '../screens/settings/ServerScreen';
 import { useAuthStore } from '../store/authStore';
 import { colors, fonts, spacing, type } from '../theme';
 import { ReportsStackNavigator } from './ReportsStackNavigator';
+import { StaffStackNavigator } from './StaffStackNavigator';
 import { StockStackNavigator } from './StockStackNavigator';
 import { TabNavigator } from './TabNavigator';
 import type { AppStackParamList, AuthStackParamList } from './types';
@@ -59,22 +60,31 @@ function AuthFlow() {
   );
 }
 
-function AppFlow({ isAdmin }: { isAdmin: boolean }) {
+function AppFlow({ isAdmin, hasStock }: { isAdmin: boolean; hasStock: boolean }) {
   return (
     <AppStack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <AppStack.Screen name="Tabs">
         {({ navigation }) => <TabNavigator onOpenServer={() => navigation.navigate('ServerSettings')} />}
       </AppStack.Screen>
+
       {/* Pushed over the tabs from More, so the stock screens get the full
-          height of the app rather than sharing it with the tab bar. */}
-      <AppStack.Screen name="Stock" component={StockStackNavigator} />
+          height of the app rather than sharing it with the tab bar.
+          Registered only when the owner put Stock on this account's menu —
+          the write endpoints behind it are gated by `stock.in` / `stock.adjust`
+          either way, and valuation is owner-only whatever the menu says. */}
+      {hasStock ? <AppStack.Screen name="Stock" component={StockStackNavigator} /> : null}
 
       {/* Registered only for the shop owner. A staff session's navigator has
-          no Reports route at all — not a hidden one, not a disabled one — so
-          there is nothing to reach by deep link or stale back-stack entry.
-          The server's 403 is still the real boundary; this is defence in
-          depth on top of it. */}
-      {isAdmin ? <AppStack.Screen name="Reports" component={ReportsStackNavigator} /> : null}
+          no Reports or Staff route at all — not a hidden one, not a disabled
+          one — so there is nothing to reach by deep link or stale back-stack
+          entry. The server's 403 is still the real boundary; this is defence
+          in depth on top of it. */}
+      {isAdmin ? (
+        <>
+          <AppStack.Screen name="Reports" component={ReportsStackNavigator} />
+          <AppStack.Screen name="Staff" component={StaffStackNavigator} />
+        </>
+      ) : null}
 
       <AppStack.Screen name="ServerSettings">
         {({ navigation }) => <ServerScreen onBack={() => navigation.goBack()} />}
@@ -89,12 +99,15 @@ export function RootNavigator() {
   // `bootstrap` re-reads the user at launch, so this reflects the account's
   // current role — not whatever it was when the token was signed.
   const isAdmin = useAuthStore((s) => s.user?.role === 'ADMIN');
+  // Fetched from /me/menu alongside the user at sign-in and at launch, so an
+  // assignment the owner changed overnight is in force before anything renders.
+  const hasStock = useAuthStore((s) => s.menu.includes('STOCK'));
 
   if (status === 'restoring') return <RestoringSession />;
 
   return (
     <NavigationContainer theme={navigationTheme}>
-      {status === 'signedIn' ? <AppFlow isAdmin={isAdmin} /> : <AuthFlow />}
+      {status === 'signedIn' ? <AppFlow isAdmin={isAdmin} hasStock={hasStock} /> : <AuthFlow />}
     </NavigationContainer>
   );
 }

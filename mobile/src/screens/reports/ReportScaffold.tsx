@@ -11,7 +11,7 @@ import { useApiError, type ReadableError } from '../../hooks/useApiError';
 import { useResponsive } from '../../hooks/useResponsive';
 import { shareReportExport, type ExportFormat } from '../../utils/reportExport';
 import { ICON_STROKE, colors, radius, shadow, spacing, tabularNumbers, type } from '../../theme';
-import { RangeBar } from './RangeBar';
+import { RangeBar } from '../../components/RangeBar';
 import type { DateRange } from '../../utils/reportRange';
 
 export interface SummaryFigure {

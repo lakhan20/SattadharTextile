@@ -1,0 +1,235 @@
+### Sattadhar Textile — Khata (credit ledger) module
+### VS Code "REST Client" extension (humao.rest-client). Run top to bottom.
+### Sign in first (steps 1–2), then paste the ids from steps 3–4.
+###
+### The whole point of this file is the last block: run steps 16–21 as STAFF
+### and watch the shop-wide views come back 403 while the per-customer ones
+### keep working.
+
+@base = http://localhost:4000
+@api = {{base}}/api/v1
+
+### ─── 1. Login as ADMIN ─────────────────────────────────────────────────
+# @name adminLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "admin", "password": "ChangeMe@123" }
+
+###
+@adminAccess = {{adminLogin.response.body.data.accessToken}}
+
+### ─── 2. Login as STAFF ─────────────────────────────────────────────────
+### kirti is seeded with `payment.record` and `ledger.view` both ON.
+# @name staffLogin
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{ "username": "kirti", "password": "Staff@123" }
+
+###
+@staffAccess = {{staffLogin.response.body.data.accessToken}}
+
+### ─── 3. Find the seeded customers — copy two ids below ─────────────────
+### "Vasant Silk House" carries a seeded opening balance of 12,500.
+### "Rohan Traders" has a deliberately small 5,000 credit limit.
+GET {{api}}/customers?pageSize=50
+Authorization: Bearer {{adminAccess}}
+
+###
+@customerId = <PASTE_VASANT_SILK_HOUSE_ID>
+@smallLimitCustomerId = <PASTE_ROHAN_TRADERS_ID>
+
+### ─── 4. Find a product with stock — copy the id below ──────────────────
+GET {{api}}/products?pageSize=50
+Authorization: Bearer {{adminAccess}}
+
+###
+@productId = <PASTE_ANY_IN_STOCK_PRODUCT_ID>
+
+### ─── 5. The opening balance is a real ledger entry ─────────────────────
+### Expect one OPENING row whose balanceAfter equals customer.outstanding.
+GET {{api}}/ledger/customer/{{customerId}}
+Authorization: Bearer {{adminAccess}}
+
+### ─── 6. A CREDIT sale — this is what raises the khata ──────────────────
+# @name creditBill
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "billingMode": "GST",
+  "customerId": "{{customerId}}",
+  "paymentMode": "CREDIT",
+  "items": [{ "productId": "{{productId}}", "qty": 2 }]
+}
+
+###
+@billId = {{creditBill.response.body.data.id}}
+
+### ─── 7. Confirm the sale wrote a CREDIT_SALE row ───────────────────────
+### The newest entry should be type CREDIT_SALE, carry the bill number, and
+### its balanceAfter should equal the customer's new outstanding.
+GET {{api}}/ledger/customer/{{customerId}}?pageSize=5
+Authorization: Bearer {{adminAccess}}
+
+### ─── 8. Partial payment ────────────────────────────────────────────────
+### Watch `allocations`: the money lands on the OLDEST unpaid bill first.
+POST {{api}}/ledger/payment
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "customerId": "{{customerId}}",
+  "amount": 500,
+  "paymentMode": "UPI",
+  "note": "Part payment at the counter"
+}
+
+### ─── 9. Payment against one named bill ─────────────────────────────────
+### refBillId jumps the queue; anything left over still flows to older bills.
+POST {{api}}/ledger/payment
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "customerId": "{{customerId}}",
+  "amount": 1000,
+  "paymentMode": "CASH",
+  "refBillId": "{{billId}}"
+}
+
+### ─── 10. The bill's own dueAmount moved too ────────────────────────────
+### paymentStatus should now read PARTIAL (or PAID if fully covered).
+GET {{api}}/bills/{{billId}}
+Authorization: Bearer {{adminAccess}}
+
+### ─── 11. The full statement, oldest first ──────────────────────────────
+### `totals.debit − totals.credit` must equal `customer.outstanding`.
+GET {{api}}/ledger/customer/{{customerId}}?sort=asc&pageSize=100
+Authorization: Bearer {{adminAccess}}
+
+### ─── 12. Debit note — charges the customer more ────────────────────────
+POST {{api}}/ledger/note
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "customerId": "{{customerId}}",
+  "type": "DEBIT",
+  "amount": 250,
+  "reason": "Delivery charge recovered"
+}
+
+### ─── 13. Credit note — forgives part of the balance ────────────────────
+POST {{api}}/ledger/note
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "customerId": "{{customerId}}",
+  "type": "CREDIT",
+  "amount": 250,
+  "reason": "Waived as goodwill"
+}
+
+### ─── 14. A note with no reason is refused ──────────────────────────────
+### Expect 400 VALIDATION_ERROR.
+POST {{api}}/ledger/note
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{ "customerId": "{{customerId}}", "type": "CREDIT", "amount": 100 }
+
+### ─── 15. Shop-wide outstanding + ageing (ADMIN) ────────────────────────
+GET {{api}}/ledger/outstanding
+Authorization: Bearer {{adminAccess}}
+
+###
+GET {{api}}/ledger/ageing
+Authorization: Bearer {{adminAccess}}
+
+### ─── 16. Credit limit — a sale that does not fit is refused ────────────
+### Rohan Traders' limit is 5,000. Expect 409 CREDIT_LIMIT_EXCEEDED, and
+### note that NOTHING is written: no bill, no stock movement, no ledger row.
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "billingMode": "GST",
+  "customerId": "{{smallLimitCustomerId}}",
+  "paymentMode": "CREDIT",
+  "items": [{ "productId": "{{productId}}", "qty": 20 }]
+}
+
+### ─── 17. The owner may override deliberately ───────────────────────────
+### Same request plus the flag. Expect 201. A STAFF token cannot do this —
+### the service drops the flag for anyone who is not ADMIN.
+POST {{api}}/bills
+Content-Type: application/json
+Authorization: Bearer {{adminAccess}}
+
+{
+  "billingMode": "GST",
+  "customerId": "{{smallLimitCustomerId}}",
+  "paymentMode": "CREDIT",
+  "overrideCreditLimit": true,
+  "items": [{ "productId": "{{productId}}", "qty": 20 }]
+}
+
+### ─── 18. Payment reminder — a wa.me link, nothing sent ─────────────────
+### Paste `whatsappUrl` into a browser to open WhatsApp with the message typed.
+POST {{api}}/ledger/reminder/{{customerId}}
+Authorization: Bearer {{adminAccess}}
+
+### ═══ STAFF — the boundary ══════════════════════════════════════════════
+
+### ─── 19. STAFF may read ONE customer's khata ───────────────────────────
+### Expect 200.
+GET {{api}}/ledger/customer/{{customerId}}
+Authorization: Bearer {{staffAccess}}
+
+### ─── 20. STAFF may take money at the counter ───────────────────────────
+### Expect 201.
+POST {{api}}/ledger/payment
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{
+  "customerId": "{{customerId}}",
+  "amount": 100,
+  "paymentMode": "CASH",
+  "note": "Counter collection"
+}
+
+### ─── 21. STAFF may NOT see the shop's book ─────────────────────────────
+### All three expect 403 FORBIDDEN with no payload — not a filtered list,
+### not a zeroed total.
+GET {{api}}/ledger/outstanding
+Authorization: Bearer {{staffAccess}}
+
+###
+GET {{api}}/ledger/ageing
+Authorization: Bearer {{staffAccess}}
+
+###
+POST {{api}}/ledger/note
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{
+  "customerId": "{{customerId}}",
+  "type": "CREDIT",
+  "amount": 1000,
+  "reason": "Staff should not be able to do this"
+}
+
+### ─── 22. CHEQUE / CARD / CREDIT are not receipt modes ──────────────────
+### Expect 400. A khata payment is money already settled.
+POST {{api}}/ledger/payment
+Content-Type: application/json
+Authorization: Bearer {{staffAccess}}
+
+{ "customerId": "{{customerId}}", "amount": 500, "paymentMode": "CHEQUE" }

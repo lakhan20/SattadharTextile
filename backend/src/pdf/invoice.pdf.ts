@@ -1,8 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import PDFDocument from 'pdfkit';
 import { BillingMode, TaxType, type Bill, type BillItem, type ShopSetting } from '@prisma/client';
-import { env } from '../config/env';
+import type { Response } from 'express';
 import { amountInWordsIndian } from '../utils/numberToWords';
 
 export type InvoiceLang = 'en' | 'gu';
@@ -284,32 +282,30 @@ export function renderInvoicePdf(doc: PDFKit.PDFDocument, data: InvoicePdfData):
 }
 
 /** Filenames must not contain "/" — FY27/T/00001 → FY27-T-00001.pdf. */
-function invoiceFileName(billNumber: string): string {
+export function invoiceFileName(billNumber: string): string {
   return `${billNumber.replace(/\//g, '-')}.pdf`;
 }
 
 /**
- * Renders and saves the PDF to disk, returning the path stored on
- * bill.pdfPathEn/pdfPathGu (relative to the backend working directory).
+ * Streams the invoice straight to the response. Invoices are rendered fresh on
+ * every download rather than kept on disk: the bill row is the source of truth,
+ * rendering one takes milliseconds, and a shop doing a few hundred bills a month
+ * would otherwise accumulate a directory that only ever grows — and goes stale
+ * the moment a bill is revised or the shop's details change.
  */
-export async function generateInvoicePdfFile(data: InvoicePdfData): Promise<string> {
-  const dir = path.resolve(process.cwd(), env.INVOICE_DIR);
-  fs.mkdirSync(dir, { recursive: true });
-
-  const fileName = invoiceFileName(data.bill.billNumber);
-  const absolutePath = path.join(dir, fileName);
-  const relativePath = path.join(env.INVOICE_DIR, fileName).split(path.sep).join('/');
-
+export function streamInvoicePdf(res: Response, data: InvoicePdfData): Promise<void> {
   const doc = new PDFDocument({ size: 'A4', margin: PAGE_MARGIN });
-  const stream = fs.createWriteStream(absolutePath);
-  doc.pipe(stream);
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${invoiceFileName(data.bill.billNumber)}"`);
+  doc.pipe(res);
+
   renderInvoicePdf(doc, data);
   doc.end();
 
-  await new Promise<void>((resolve, reject) => {
-    stream.on('finish', () => resolve());
-    stream.on('error', reject);
+  return new Promise<void>((resolve, reject) => {
+    res.on('finish', () => resolve());
+    res.on('error', reject);
+    doc.on('error', reject);
   });
-
-  return relativePath;
 }

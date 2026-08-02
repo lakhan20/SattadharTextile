@@ -19,6 +19,8 @@ export const ErrorCode = {
   FORBIDDEN: 'FORBIDDEN',
   NOT_FOUND: 'NOT_FOUND',
   CONFLICT: 'CONFLICT',
+  /** A credit sale would push the customer past `customers.creditLimit`. */
+  CREDIT_LIMIT_EXCEEDED: 'CREDIT_LIMIT_EXCEEDED',
   RATE_LIMITED: 'RATE_LIMITED',
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
@@ -68,6 +70,14 @@ export const forbidden = (message = 'You do not have access to this.', logContex
 export const notFound = (message = 'Not found.') => new AppError(404, ErrorCode.NOT_FOUND, message);
 
 export const conflict = (message: string) => new AppError(409, ErrorCode.CONFLICT, message);
+
+/**
+ * 409 rather than 403: the caller is allowed to sell on credit, this particular
+ * sale just does not fit inside the customer's limit. Its own code so the UI
+ * can offer the owner an override instead of showing a dead end.
+ */
+export const creditLimitExceeded = (message: string) =>
+  new AppError(409, ErrorCode.CREDIT_LIMIT_EXCEEDED, message);
 
 export const internal = (message = 'Something went wrong on our side.') =>
   new AppError(500, ErrorCode.INTERNAL_ERROR, message);

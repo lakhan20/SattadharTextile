@@ -16,6 +16,7 @@ import {
   Server,
   ShieldCheck,
   Users,
+  Wallet,
   Warehouse,
 } from 'lucide-react-native';
 import { AppHeader } from '../../components/AppHeader';
@@ -24,7 +25,7 @@ import { Screen } from '../../components/Screen';
 import { pingServer } from '../../api/auth';
 import { PERMISSION_KEYS, type PermissionKey } from '../../api/types';
 import { LANGUAGES, LANGUAGE_LABEL, type AppLanguage } from '../../i18n';
-import { useAuthStore } from '../../store/authStore';
+import { useAuthStore, useHasMenu } from '../../store/authStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { ICON_STROKE, TAP_TARGET, colors, radius, spacing, type } from '../../theme';
 import type { AppStackParamList } from '../../navigation/types';
@@ -42,6 +43,9 @@ export function MoreScreen({ onOpenServer }: { onOpenServer: () => void }) {
 
   const [reachability, setReachability] = useState<Reachability>('checking');
   const isAdmin = user?.role === 'ADMIN';
+  // The Stock stack is registered only for a session whose menu carries STOCK,
+  // so this row must not offer a route that is not there.
+  const hasStock = useHasMenu('STOCK');
 
   const checkServer = useCallback(async () => {
     setReachability('checking');
@@ -126,19 +130,23 @@ export function MoreScreen({ onOpenServer }: { onOpenServer: () => void }) {
         </View>
 
         {/* ── Shop floor ──────────────────────────── */}
-        <View>
-          <SectionHeader title={t('more.shopFloor')} />
-          <Card padded={false}>
-            {/* Open to everyone: STAFF get the shelf and the ledger read-only,
-                and the server refuses the write endpoints regardless. */}
-            <PressableRow
-              icon={<Warehouse size={18} color={colors.muted} strokeWidth={ICON_STROKE} />}
-              label={t('stock.title')}
-              value={isAdmin ? t('more.stockSubAdmin') : t('more.stockSubStaff')}
-              onPress={() => navigation.navigate('Stock', { screen: 'StockOverview' })}
-            />
-          </Card>
-        </View>
+        {/* Shown when the owner put Stock on this account's menu. Whether they
+            may WRITE to it is a separate question the server answers with
+            `stock.in` / `stock.adjust`, and valuation stays owner-only however
+            the menu was assigned. */}
+        {hasStock ? (
+          <View>
+            <SectionHeader title={t('more.shopFloor')} />
+            <Card padded={false}>
+              <PressableRow
+                icon={<Warehouse size={18} color={colors.muted} strokeWidth={ICON_STROKE} />}
+                label={t('stock.title')}
+                value={isAdmin ? t('more.stockSubAdmin') : t('more.stockSubStaff')}
+                onPress={() => navigation.navigate('Stock', { screen: 'StockOverview' })}
+              />
+            </Card>
+          </View>
+        ) : null}
 
         {/* ── Preferences ─────────────────────────── */}
         <View>
@@ -205,13 +213,40 @@ export function MoreScreen({ onOpenServer }: { onOpenServer: () => void }) {
         <View>
           <SectionHeader title={t('more.adminSection')} />
           <Card padded={false}>
-            <LockedRow
-              icon={<Users size={18} color={colors.muted} strokeWidth={ICON_STROKE} />}
-              label={t('more.staffAccounts')}
-              allowed={isAdmin}
-              lockedLabel={t('more.lockedToOwner')}
-              soonLabel={t('modules.buildingNow')}
-            />
+            {/* Staff accounts and their menu assignment. A staff session's
+                navigator has no Staff route at all, and /admin/staff returns
+                403 for a staff token — the locked row is honesty about the
+                app's shape, not the thing keeping them out. */}
+            {isAdmin ? (
+              <PressableRow
+                icon={<Users size={18} color={colors.muted} strokeWidth={ICON_STROKE} />}
+                label={t('more.staffAccounts')}
+                value={t('more.staffAccountsSub')}
+                onPress={() => navigation.navigate('Staff', { screen: 'StaffList' })}
+              />
+            ) : (
+              <LockedRow
+                icon={<Users size={18} color={colors.muted} strokeWidth={ICON_STROKE} />}
+                label={t('more.staffAccounts')}
+                allowed={false}
+                lockedLabel={t('more.lockedToOwner')}
+                soonLabel={t('modules.buildingNow')}
+              />
+            )}
+            {/* The khata itself is open to staff and lives in the Customers
+                tab. What the *whole shop* is owed is not, so the shortcut to
+                it sits here — and a staff navigator has no such route. */}
+            {isAdmin ? (
+              <PressableRow
+                icon={<Wallet size={18} color={colors.muted} strokeWidth={ICON_STROKE} />}
+                label={t('more.khata')}
+                value={t('more.khataSubAdmin')}
+                onPress={() =>
+                  navigation.navigate('Tabs', { screen: 'Customers', params: { screen: 'Outstanding' } })
+                }
+              />
+            ) : null}
+
             {/* Reports are built now, so for the owner this is a real link.
                 Staff keep the locked row: the app's shape stays honest about
                 what exists, and their navigator has no Reports route to

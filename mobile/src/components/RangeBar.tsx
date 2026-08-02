@@ -2,29 +2,34 @@ import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { CalendarRange, X } from 'lucide-react-native';
-import { Button } from '../../components/Button';
-import { Chip } from '../../components/Chip';
-import { TextField } from '../../components/TextField';
-import { ICON_STROKE, TAP_TARGET, colors, radius, shadow, spacing, type } from '../../theme';
+import { Button } from './Button';
+import { Chip } from './Chip';
+import { TextField } from './TextField';
+import { ICON_STROKE, TAP_TARGET, colors, radius, shadow, spacing, type } from '../theme';
 import {
+  REPORT_PRESETS,
   detectPreset,
   formatRange,
   parseDateKey,
   rangeForPreset,
+  type ConcretePreset,
   type DateRange,
-  type RangePreset,
-} from '../../utils/reportRange';
+} from '../utils/reportRange';
 
 interface RangeBarProps {
   value: DateRange;
   onChange: (range: DateRange) => void;
+  /** Which quick chips to offer. Reports and the bills list want different ones. */
+  presets?: ConcretePreset[];
 }
 
-const PRESETS: { preset: Exclude<RangePreset, 'CUSTOM'>; labelKey: string }[] = [
-  { preset: 'TODAY', labelKey: 'reports.presetToday' },
-  { preset: 'THIS_MONTH', labelKey: 'reports.presetMonth' },
-  { preset: 'THIS_FY', labelKey: 'reports.presetFy' },
-];
+const PRESET_LABELS: Record<ConcretePreset, string> = {
+  TODAY: 'reports.presetToday',
+  YESTERDAY: 'reports.presetYesterday',
+  THIS_WEEK: 'reports.presetWeek',
+  THIS_MONTH: 'reports.presetMonth',
+  THIS_FY: 'reports.presetFy',
+};
 
 /**
  * Quick presets plus a custom range.
@@ -35,18 +40,18 @@ const PRESETS: { preset: Exclude<RangePreset, 'CUSTOM'>; labelKey: string }[] = 
  * for a shop that reaches for "This month" nine times in ten — sit behind the
  * presets rather than in front of them.
  */
-export function RangeBar({ value, onChange }: RangeBarProps) {
+export function RangeBar({ value, onChange, presets = REPORT_PRESETS }: RangeBarProps) {
   const { t } = useTranslation();
   const [customOpen, setCustomOpen] = useState(false);
-  const active = detectPreset(value);
+  const active = detectPreset(value, presets);
 
   return (
     <View style={styles.wrap}>
       <View style={styles.chipRow}>
-        {PRESETS.map(({ preset, labelKey }) => (
+        {presets.map((preset) => (
           <Chip
             key={preset}
-            label={t(labelKey)}
+            label={t(PRESET_LABELS[preset])}
             active={active === preset}
             onPress={() => onChange(rangeForPreset(preset))}
           />
