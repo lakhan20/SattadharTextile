@@ -137,7 +137,7 @@ export function CategoryFormScreen({ navigation, route }: Props) {
             <Button
               label={submitting ? t('common.loading') : t('categories.save')}
               onPress={() => void handleSave()}
-              variant="gold"
+              variant="accent"
               loading={submitting}
               style={styles.submit}
             />

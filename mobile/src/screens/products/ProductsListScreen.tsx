@@ -287,7 +287,7 @@ export function ProductsListScreen({ navigation }: Props) {
           accessibilityLabel={t('products.add')}
           style={styles.fab}
         >
-          <Plus size={24} color="#FFFFFF" strokeWidth={ICON_STROKE} />
+          <Plus size={24} color={colors.onAccent} strokeWidth={ICON_STROKE} />
         </Pressable>
       ) : null}
     </View>

@@ -111,7 +111,7 @@ export function SubCategoryListScreen({ navigation }: Props) {
               accessibilityLabel={t('subCategories.add')}
               style={styles.addButton}
             >
-              <Plus size={20} color="#FFFFFF" strokeWidth={ICON_STROKE} />
+              <Plus size={20} color={colors.onAccent} strokeWidth={ICON_STROKE} />
             </Pressable>
           ) : undefined
         }

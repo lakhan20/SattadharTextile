@@ -370,7 +370,7 @@ export function ProductFormScreen({ navigation, route }: Props) {
             <Button
               label={submitting ? t('common.loading') : t('products.save')}
               onPress={() => void handleSave()}
-              variant="gold"
+              variant="accent"
               loading={submitting}
               style={styles.submit}
             />

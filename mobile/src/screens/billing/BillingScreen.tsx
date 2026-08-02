@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -6,6 +6,7 @@ import {
   Linking,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -19,6 +20,7 @@ import { Banner } from '../../components/Banner';
 import { Button } from '../../components/Button';
 import { Card, SectionHeader } from '../../components/Card';
 import { TextField } from '../../components/TextField';
+import { Touchable } from '../../components/Touchable';
 import { ApiError } from '../../api/client';
 import { billsApi } from '../../api/bills';
 import type {
@@ -31,8 +33,22 @@ import type {
   TaxType,
 } from '../../api/types';
 import { useApiError, type ReadableError } from '../../hooks/useApiError';
+import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
+import { useResponsive } from '../../hooks/useResponsive';
 import { useAuthStore, useIsAdmin } from '../../store/authStore';
-import { ICON_STROKE, TAP_TARGET, colors, radius, spacing, tabularNumbers, type } from '../../theme';
+import {
+  ICON_STROKE,
+  TAP_TARGET,
+  TRACK_INSET,
+  colors,
+  control,
+  radius,
+  ring,
+  shadow,
+  spacing,
+  tabularNumbers,
+  type,
+} from '../../theme';
 import { previewBill } from '../../utils/billCalc';
 import { formatMoney } from '../../utils/money';
 import type { BillingStackParamList } from '../../navigation/types';
@@ -53,7 +69,37 @@ const nextLineKey = (): string => `line-${++lineCounter}`;
 export function BillingScreen({ navigation }: Props) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const { isTablet, isLandscape } = useResponsive();
+  const keyboardVisible = useKeyboardVisible();
   const readError = useApiError();
+
+  /**
+   * The walk-in fields live in the list header, so focusing one has to bring
+   * it into a viewport the keyboard has just made much shorter. `y` is
+   * captured on layout rather than measured on demand — measuring after focus
+   * races the keyboard animation and lands on the pre-keyboard geometry.
+   */
+  const listRef = useRef<FlatList<BillLine>>(null);
+  const walkInY = useRef(0);
+
+  function revealWalkInFields() {
+    // One frame after the keyboard has committed, so the list has already been
+    // resized and the offset lands where we expect it to.
+    setTimeout(() => {
+      listRef.current?.scrollToOffset({
+        offset: Math.max(0, walkInY.current + spacing.lg - spacing.sm),
+        animated: true,
+      });
+    }, 150);
+  }
+
+  /**
+   * Wide enough to put the running total beside the lines instead of under
+   * them. On a phone in landscape the dock would otherwise eat most of the
+   * remaining height and leave two line rows visible; side by side, the total
+   * stays permanently in view while the list keeps its full height.
+   */
+  const sideBySide = isTablet || isLandscape;
   const maxDiscountPercent = useAuthStore((s) => s.user?.maxDiscountPercent ?? 0);
   const isAdmin = useIsAdmin();
 
@@ -277,6 +323,49 @@ export function BillingScreen({ navigation }: Props) {
     }
   }
 
+  const dockBody = (
+    <View style={{ paddingBottom: insets.bottom }}>
+      <TotalDock
+        preview={preview}
+        billingMode={billingMode}
+        taxType={taxType}
+        onGenerate={() => void handleGenerate()}
+        generating={generating}
+        canGenerate={canGenerate}
+        sending={sending}
+        {...(createdBill
+          ? {
+              onWhatsApp: () => void handleWhatsApp(),
+              onNewBill: () => confirmDiscard(resetBill),
+            }
+          : null)}
+      />
+    </View>
+  );
+
+  /**
+   * In the side-by-side layout the dock lives in a column of fixed height, and
+   * a GST bill with a discount row can be taller than that column on a phone
+   * held in landscape — so it scrolls, and only then. Stacked under the list on
+   * a phone held upright there is nothing to scroll: the list above it is the
+   * flexible element and the dock is simply as tall as its contents.
+   */
+  const dock = sideBySide ? (
+    <ScrollView
+      style={styles.flex}
+      contentContainerStyle={styles.dockScroll}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      // The dock is the anchor of this screen; it should never bounce away
+      // from the edge it is docked to.
+      bounces={false}
+    >
+      {dockBody}
+    </ScrollView>
+  ) : (
+    dockBody
+  );
+
   const customerSubtitle = customer
     ? [customer.state, billingMode === 'GST' ? (customer.gstin ?? t('billing.noGstin')) : null]
         .filter(Boolean)
@@ -300,32 +389,49 @@ export function BillingScreen({ navigation }: Props) {
         }
       />
 
+      {/*
+        `behavior` must be set on Android too. It used to be left undefined
+        here, which makes this component inert — that was survivable back when
+        Android's adjustResize shrank the window for us, but the app runs
+        edge-to-edge (see app.json), so the window no longer resizes and the
+        app owns its own keyboard inset. Undefined meant the focused field
+        simply sat underneath the keyboard.
+      */}
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={insets.top + 56}
       >
+        {/* Which document is being written is the one fact that must never
+            leave the screen. A tax invoice and an estimate are legally
+            different and the counter can be twenty lines deep in a bill when
+            someone asks "is this pakka?" — so this is pinned outside the list
+            rather than scrolling away with the rest of the header. */}
+        <View style={styles.modeBar}>
+          <ModeToggle
+            value={billingMode}
+            onChange={(mode) => {
+              setBillingMode(mode);
+              setCreatedBill(null);
+            }}
+            disabled={Boolean(createdBill)}
+            previewNumber={createdBill?.billNumber ?? null}
+          />
+        </View>
+
+        <View style={sideBySide ? styles.wideRow : styles.flex}>
         <FlatList
+          ref={listRef}
           data={lines}
           keyExtractor={(item) => item.key}
+          // `flex: 1` so the list takes the remaining width beside the dock
+          // column on a wide screen, and the full height under it on a phone.
+          style={styles.flex}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={
             <View style={styles.headerBlock}>
-              <ModeToggle
-                value={billingMode}
-                onChange={(mode) => {
-                  setBillingMode(mode);
-                  setCreatedBill(null);
-                }}
-                disabled={Boolean(createdBill)}
-                previewNumber={createdBill?.billNumber ?? null}
-              />
-
-              <Card
-                onPress={createdBill ? undefined : () => setCustomerPickerOpen(true)}
-                style={styles.customerCard}
-              >
+              <Card onPress={createdBill ? undefined : () => setCustomerPickerOpen(true)}>
                 <View style={styles.customerRow}>
                   <View style={styles.customerIcon}>
                     <UserRound size={20} color={colors.primary} strokeWidth={ICON_STROKE} />
@@ -348,11 +454,17 @@ export function BillingScreen({ navigation }: Props) {
               </Card>
 
               {!customer && !createdBill ? (
-                <View style={styles.walkInFields}>
+                <View
+                  style={styles.walkInFields}
+                  onLayout={(event) => {
+                    walkInY.current = event.nativeEvent.layout.y;
+                  }}
+                >
                   <TextField
                     label={t('billing.walkInName')}
                     value={walkInName}
                     onChangeText={setWalkInName}
+                    onFocus={revealWalkInFields}
                     autoCapitalize="words"
                     containerStyle={styles.flex}
                   />
@@ -360,6 +472,7 @@ export function BillingScreen({ navigation }: Props) {
                     label={t('billing.walkInPhone')}
                     value={walkInPhone}
                     onChangeText={setWalkInPhone}
+                    onFocus={revealWalkInFields}
                     keyboardType="phone-pad"
                     containerStyle={styles.flex}
                   />
@@ -402,7 +515,7 @@ export function BillingScreen({ navigation }: Props) {
                 />
               ) : null}
 
-              <SectionHeader title={t('billing.items')} />
+              <SectionHeader title={t('billing.items')} rule />
             </View>
           }
           ListEmptyComponent={<Text style={styles.emptyLines}>{t('billing.noItems')}</Text>}
@@ -488,36 +601,38 @@ export function BillingScreen({ navigation }: Props) {
           }
         />
 
-        {/* Pinned above the totals, not buried in the scrolling footer — this
-            is the single action staff repeat most often per bill, so it must
-            never require a scroll to reach once the line list grows long. */}
-        {createdBill ? null : (
-          <View style={styles.addProductBar}>
-            <Button
-              label={t('billing.addProduct')}
-              onPress={() => setProductPickerOpen(true)}
-              variant="gold"
-              icon={<Plus size={18} color="#FFFFFF" strokeWidth={ICON_STROKE} />}
-            />
-          </View>
-        )}
+        {/* The dock column. Side by side on a wide screen, stacked under the
+            list on a phone held upright — either way the running total and the
+            two actions travel together and neither can be scrolled away. */}
+        <View style={sideBySide ? styles.sidebar : null}>
+          {/* A round + rather than a full-width bar. Adding a line is the
+              action staff repeat most per bill so it stays pinned and can
+              never be scrolled away — but at full width it was claiming the
+              visual weight that belongs to Generate bill, and eating a row of
+              height on every screen. It is `primary`, not `accent`: adding a
+              line is a step, the accent belongs to the action that finishes
+              the bill. */}
+          {/* Stood down while the keyboard is up. Nobody reaches for "add a
+              product" mid-way through typing a name or a rate, and the 68pt it
+              occupies is the difference between the focused field having
+              somewhere to scroll to and not. The dock stays: when the field
+              being typed into is a rate, watching the total move is the whole
+              point. */}
+          {createdBill || keyboardVisible ? null : (
+            <View style={styles.addBar}>
+              <Touchable
+                onPress={() => setProductPickerOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={t('billing.addProduct')}
+                style={styles.addButton}
+              >
+                <Plus size={26} color={colors.onPrimary} strokeWidth={ICON_STROKE} />
+              </Touchable>
+            </View>
+          )}
 
-        <View style={{ paddingBottom: insets.bottom }}>
-          <TotalDock
-            preview={preview}
-            billingMode={billingMode}
-            taxType={taxType}
-            onGenerate={() => void handleGenerate()}
-            generating={generating}
-            canGenerate={canGenerate}
-            sending={sending}
-            {...(createdBill
-              ? {
-                  onWhatsApp: () => void handleWhatsApp(),
-                  onNewBill: () => confirmDiscard(resetBill),
-                }
-              : null)}
-          />
+          {dock}
+        </View>
         </View>
       </KeyboardAvoidingView>
 
@@ -541,9 +656,11 @@ function rateFor(line: BillLine, customer: Customer | null): number {
 }
 
 /**
- * Indigo when a tax invoice is being written, gold when it is an estimate —
+ * Teal when a tax invoice is being written, mulberry when it is an estimate —
  * the two documents are legally different and must never be confused at a
- * glance.
+ * glance. This is the one place the accent marks state rather than an action,
+ * and it earns the exception: picking the wrong one is a compliance problem,
+ * not a UI mistake.
  */
 function ModeToggle({
   value,
@@ -592,21 +709,49 @@ function ModeToggle({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
+  wideRow: { flex: 1, flexDirection: 'row' },
+  /**
+   * Wide enough to hold "Taxable value" against a six-figure amount without
+   * either wrapping, capped as a fraction so it never crowds the line list on
+   * a phone in landscape. Bottom-aligned so the dock sits on the floor of the
+   * column rather than floating in the middle of it.
+   */
+  sidebar: { width: 340, maxWidth: '44%', minWidth: 260, justifyContent: 'flex-end' },
   list: { padding: spacing.lg, gap: spacing.md, flexGrow: 1 },
   headerBlock: { gap: spacing.md, marginBottom: spacing.xs },
   footerBlock: { gap: spacing.md, marginTop: spacing.md },
-  addProductBar: {
+  /** The pinned GST/Estimate bar. Content scrolls under it, never over it. */
+  modeBar: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
     backgroundColor: colors.background,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
+
+  addBar: {
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  addButton: {
+    width: control.field,
+    height: control.field,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.raised,
+  },
+
+  /** `flexGrow` + end-justified: the dock sits on the floor until it outgrows it. */
+  dockScroll: { flexGrow: 1, justifyContent: 'flex-end' },
   emptyLines: { ...type.small, color: colors.muted, textAlign: 'center', paddingVertical: spacing.xl },
 
   historyButton: {
-    width: 36,
-    height: 36,
+    width: ring.sm,
+    height: ring.sm,
     borderRadius: radius.pill,
     backgroundColor: colors.primarySoft,
     alignItems: 'center',
@@ -620,33 +765,42 @@ const styles = StyleSheet.create({
     borderRadius: radius.input,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 3,
-    gap: 3,
+    padding: TRACK_INSET,
+    gap: TRACK_INSET,
   },
   modeSegment: {
     flex: 1,
     minHeight: TAP_TARGET - 8,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.input - 3,
+    borderRadius: radius.input - TRACK_INSET,
   },
   modeLabel: { ...type.smallStrong, color: colors.muted },
-  modeLabelActive: { color: '#FFFFFF' },
+  // White reads on both the teal and the mulberry thumb, so the active label
+  // needs no per-mode branch.
+  modeLabelActive: { color: colors.onPrimary },
   modeNumber: { ...type.caption, color: colors.muted, textAlign: 'center', ...tabularNumbers },
 
-  customerCard: { paddingVertical: spacing.md },
-  customerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  // No padding override: who the bill is for is a headline on this screen, so
+  // the card gets the same full padding as any other and the row inside it is
+  // sized to be hit reliably with a thumb mid-transaction.
+  customerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    minHeight: TAP_TARGET,
+  },
   customerIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: ring.md,
+    height: ring.md,
+    borderRadius: radius.pill,
     backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   customerText: { flex: 1 },
-  customerName: { ...type.bodyStrong, color: colors.text },
-  customerSub: { ...type.small, color: colors.muted, marginTop: 1 },
+  customerName: { ...type.h3, color: colors.text },
+  customerSub: { ...type.small, color: colors.muted, marginTop: spacing.xs },
   typeChip: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 3,

@@ -5,7 +5,7 @@ import { History, Minus, Plus, Trash2 } from 'lucide-react-native';
 import { Card } from '../../components/Card';
 import { productsApi } from '../../api/products';
 import type { DiscountType, LastPriceResponse } from '../../api/types';
-import { ICON_STROKE, TAP_TARGET, colors, radius, spacing, tabularNumbers, type } from '../../theme';
+import { ICON_STROKE, TAP_TARGET, colors, control, radius, spacing, tabularNumbers, type } from '../../theme';
 import { previewLine, type DraftLine } from '../../utils/billCalc';
 import { formatMoney, formatQty } from '../../utils/money';
 
@@ -250,7 +250,9 @@ export function BillLineRow({ line, customerId, onChange, onRemove, disabled = f
 const styles = StyleSheet.create({
   card: { gap: spacing.md },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  name: { ...type.bodyStrong, color: colors.text, flex: 1 },
+  // The product is what the row *is* — it outranks every number under it, and
+  // at body size it was competing with its own labels.
+  name: { ...type.h3, color: colors.text, flex: 1 },
   removeButton: {
     width: TAP_TARGET - 16,
     height: TAP_TARGET - 16,
@@ -267,7 +269,7 @@ const styles = StyleSheet.create({
   inputBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: TAP_TARGET - 6,
+    minHeight: control.compact,
     backgroundColor: colors.background,
     borderRadius: radius.input,
     borderWidth: 1,
@@ -298,7 +300,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: TAP_TARGET - 6,
+    minHeight: control.compact,
     backgroundColor: colors.background,
     borderRadius: radius.input,
     borderWidth: 1,
@@ -319,7 +321,11 @@ const styles = StyleSheet.create({
     ...type.kpiSmall,
     color: colors.text,
     textAlign: 'right',
-    paddingVertical: spacing.sm,
+    // Matched to the input boxes beside it so the figure sits on the same
+    // baseline as the numbers it is the sum of.
+    minHeight: control.compact,
+    textAlignVertical: 'center',
+    paddingVertical: spacing.md,
   },
 
   lastPriceButton: {

@@ -20,5 +20,5 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: radius.pill,
   },
-  text: { ...type.caption, color: '#FFFFFF', textTransform: 'uppercase' },
+  text: { ...type.caption, color: colors.onAccent, textTransform: 'uppercase' },
 });

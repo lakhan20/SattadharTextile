@@ -393,7 +393,7 @@ export function BillEditScreen({ navigation, route }: Props) {
           <Button
             label={saving ? t('common.saving') : t('bills.saveChanges')}
             onPress={() => void handleSave()}
-            variant="indigo"
+            variant="accent"
             loading={saving}
             disabled={!canSave}
           />

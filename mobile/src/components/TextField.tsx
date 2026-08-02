@@ -10,7 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
-import { ICON_STROKE, TAP_TARGET, colors, radius, spacing, type } from '../theme';
+import { ICON_STROKE, colors, control, radius, spacing, type } from '../theme';
 
 interface TextFieldProps extends Omit<TextInputProps, 'style'> {
   label: string;
@@ -102,7 +102,7 @@ const styles = StyleSheet.create({
   field: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: TAP_TARGET,
+    minHeight: control.field,
     backgroundColor: colors.surface,
     borderRadius: radius.input,
     paddingHorizontal: spacing.md,
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
   },
   eye: {
     paddingLeft: spacing.sm,
-    height: TAP_TARGET,
+    height: control.field,
     justifyContent: 'center',
   },
   error: {

@@ -8,8 +8,10 @@ interface ChipProps {
 }
 
 /**
- * Category filter chip. Gold-when-active is an explicit exception to "gold is
- * the single primary action" — this is a filter row, not a screen action.
+ * Category filter chip. Accent-when-active is the one sanctioned exception to
+ * "the accent marks a single screen action" — a filter row is navigation
+ * through what is already on screen, not an action taken on it, so it cannot
+ * be confused with the screen's one accent button.
  */
 export function Chip({ label, active = false, onPress }: ChipProps) {
   return (
@@ -42,5 +44,5 @@ const styles = StyleSheet.create({
   inactive: { backgroundColor: colors.surface, borderColor: colors.border },
   pressed: { opacity: 0.8 },
   label: { ...type.smallStrong, color: colors.text },
-  activeLabel: { color: '#FFFFFF' },
+  activeLabel: { color: colors.onAccent },
 });

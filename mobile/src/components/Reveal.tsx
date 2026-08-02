@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Animated, type StyleProp, type ViewStyle } from 'react-native';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import { motion } from '../theme';
 
 interface RevealProps {
@@ -28,8 +29,18 @@ const MAX_STAGGER_STEPS = 8;
  */
 export function Reveal({ children, index = 0, offset = 10, style }: RevealProps) {
   const progress = useRef(new Animated.Value(0)).current;
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
+    // With reduce-motion on, the row is simply already there. Note it still
+    // goes through `progress` rather than skipping the wrapper — the child
+    // must never end up mounted at opacity 0 because the setting flipped
+    // between mount and this effect.
+    if (reduceMotion) {
+      progress.setValue(1);
+      return;
+    }
+
     const animation = Animated.timing(progress, {
       toValue: 1,
       duration: motion.slow,
@@ -39,7 +50,7 @@ export function Reveal({ children, index = 0, offset = 10, style }: RevealProps)
     });
     animation.start();
     return () => animation.stop();
-  }, [progress, index]);
+  }, [progress, index, reduceMotion]);
 
   const translateY = progress.interpolate({
     inputRange: [0, 1],

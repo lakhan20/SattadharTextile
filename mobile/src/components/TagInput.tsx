@@ -69,7 +69,7 @@ export function TagInput({ label, values, onChange, placeholder, disabled = fals
           accessibilityLabel="Add"
           style={[styles.addButton, (disabled || !draft.trim()) && styles.addButtonDisabled]}
         >
-          <Plus size={18} color="#FFFFFF" strokeWidth={ICON_STROKE} />
+          <Plus size={18} color={colors.onAccent} strokeWidth={ICON_STROKE} />
         </Pressable>
       </View>
     </View>

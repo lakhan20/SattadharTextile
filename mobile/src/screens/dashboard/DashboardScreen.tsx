@@ -31,7 +31,7 @@ import type { AdminDashboard, StaffDashboard, TopCustomer, TopProduct, TrendRang
 import { useApiError, type ReadableError } from '../../hooks/useApiError';
 import { useResponsive } from '../../hooks/useResponsive';
 import { useAuthStore } from '../../store/authStore';
-import { ICON_STROKE, colors, radius, shadow, spacing, tabularNumbers, type } from '../../theme';
+import { ICON_STROKE, colors, radius, ring, shadow, spacing, tabularNumbers, type } from '../../theme';
 import { formatQty, formatRupees } from '../../utils/money';
 import type { AppStackParamList, TabParamList } from '../../navigation/types';
 
@@ -233,6 +233,7 @@ function AdminView({
 
       <Reveal index={2}>
         <SectionHeader
+          rule
           title={t('dashboard.salesTrend')}
           action={
             <View style={styles.rangeToggle}>
@@ -259,12 +260,12 @@ function AdminView({
       </Reveal>
 
       <Reveal index={3}>
-        <SectionHeader title={t('dashboard.quickActions')} />
+        <SectionHeader title={t('dashboard.quickActions')} rule />
         <QuickActions isAdmin />
       </Reveal>
 
       <Reveal index={4}>
-        <SectionHeader title={t('dashboard.gstPayable')} />
+        <SectionHeader title={t('dashboard.gstPayable')} rule />
         <Card style={styles.gstCard}>
           <View style={styles.gstRow}>
             <View style={styles.gstIconRing}>
@@ -282,7 +283,7 @@ function AdminView({
       </Reveal>
 
       <Reveal index={5}>
-        <SectionHeader title={t('dashboard.topProducts')} />
+        <SectionHeader title={t('dashboard.topProducts')} rule />
         <Card padded={false}>
           <MiniList
             rows={data.topProducts.map((product: TopProduct) => ({
@@ -299,7 +300,7 @@ function AdminView({
       </Reveal>
 
       <Reveal index={6}>
-        <SectionHeader title={t('dashboard.topCustomers')} />
+        <SectionHeader title={t('dashboard.topCustomers')} rule />
         <Card padded={false}>
           <MiniList
             rows={data.topCustomers.map((customer: TopCustomer) => ({
@@ -383,12 +384,12 @@ function StaffView({ data }: { data: StaffDashboard }) {
       </Reveal>
 
       <Reveal index={2}>
-        <SectionHeader title={t('dashboard.quickActions')} />
+        <SectionHeader title={t('dashboard.quickActions')} rule />
         <QuickActions isAdmin={false} />
       </Reveal>
 
       <Reveal index={3}>
-        <SectionHeader title={t('dashboard.lowStockAlerts')} />
+        <SectionHeader title={t('dashboard.lowStockAlerts')} rule />
         <Touchable
           onPress={() => navigation.navigate('Stock', { screen: 'StockOverview' })}
           accessibilityRole="button"
@@ -544,10 +545,10 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   filledIconRing: {
-    width: 34,
-    height: 34,
+    width: ring.sm,
+    height: ring.sm,
     borderRadius: radius.sm,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: colors.onPrimaryWash,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.md,
@@ -561,8 +562,8 @@ const styles = StyleSheet.create({
   gstCard: { gap: spacing.md },
   gstRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   gstIconRing: {
-    width: 40,
-    height: 40,
+    width: ring.md,
+    height: ring.md,
     borderRadius: radius.sm,
     backgroundColor: colors.primarySoft,
     alignItems: 'center',
@@ -590,8 +591,8 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   actionIcon: {
-    width: 38,
-    height: 38,
+    width: ring.sm,
+    height: ring.sm,
     borderRadius: radius.sm,
     backgroundColor: colors.primarySoft,
     alignItems: 'center',
@@ -635,8 +636,8 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   reportsIconRing: {
-    width: 40,
-    height: 40,
+    width: ring.md,
+    height: ring.md,
     borderRadius: radius.sm,
     backgroundColor: colors.accent,
     alignItems: 'center',
@@ -651,8 +652,8 @@ const styles = StyleSheet.create({
   myBillsCard: { gap: spacing.lg },
   myBillsHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   myBillsIconRing: {
-    width: 40,
-    height: 40,
+    width: ring.md,
+    height: ring.md,
     borderRadius: radius.sm,
     backgroundColor: colors.primarySoft,
     alignItems: 'center',
@@ -681,8 +682,8 @@ const styles = StyleSheet.create({
   },
   lowStockCardClear: { borderLeftColor: colors.success },
   lowStockIconRing: {
-    width: 40,
-    height: 40,
+    width: ring.md,
+    height: ring.md,
     borderRadius: radius.sm,
     backgroundColor: colors.warningSoft,
     alignItems: 'center',

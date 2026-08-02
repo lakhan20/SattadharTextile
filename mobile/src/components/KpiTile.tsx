@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
-import { colors, radius, shadow, spacing, tabularNumbers, type } from '../theme';
+import { colors, radius, ring, shadow, spacing, tabularNumbers, type } from '../theme';
 
 interface KpiTileProps {
   label: string;
@@ -8,8 +8,7 @@ interface KpiTileProps {
   value?: string;
   caption?: string;
   icon?: ReactNode;
-  /** `gold` is the previous palette's name for `accent`, kept as an alias. */
-  tone?: 'default' | 'warning' | 'danger' | 'success' | 'accent' | 'gold';
+  tone?: 'default' | 'warning' | 'danger' | 'success' | 'accent';
   /** Sets the tile width — used to place tiles in a computed-width grid. */
   style?: StyleProp<ViewStyle>;
 }
@@ -17,7 +16,6 @@ interface KpiTileProps {
 const TONE = {
   default: { ring: colors.primarySoft, value: colors.text },
   accent: { ring: colors.accentSoft, value: colors.text },
-  gold: { ring: colors.accentSoft, value: colors.text },
   warning: { ring: colors.warningSoft, value: colors.warningInk },
   danger: { ring: colors.dangerSoft, value: colors.dangerInk },
   success: { ring: colors.successSoft, value: colors.successInk },
@@ -69,8 +67,8 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   iconRing: {
-    width: 34,
-    height: 34,
+    width: ring.sm,
+    height: ring.sm,
     borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',

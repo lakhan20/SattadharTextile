@@ -4,22 +4,14 @@ import { TAP_TARGET, colors, radius, shadow, spacing, type } from '../theme';
 import { Touchable } from './Touchable';
 
 /**
- * `accent` is the single emphasis action on a screen — never two on one
- * screen. `primary` is the standard confirming action; `outline`/`ghost` are
- * secondary.
+ * `accent` is the single emphasis action on a screen — the one thing the
+ * screen exists to do, and never two of them. `primary` is a standard
+ * confirming action; `outline`/`ghost` are secondary.
  *
- * `gold` and `indigo` are the previous palette's names, kept as aliases so the
- * screens that still use them keep working. Prefer `accent`/`primary`.
+ * A screen is allowed to have no `accent` at all (a detail screen that only
+ * offers two equal exports, say). It is never allowed to have two.
  */
-export type ButtonVariant =
-  | 'accent'
-  | 'primary'
-  | 'outline'
-  | 'ghost'
-  | 'danger'
-  | 'whatsapp'
-  | 'gold'
-  | 'indigo';
+export type ButtonVariant = 'accent' | 'primary' | 'outline' | 'ghost' | 'danger' | 'whatsapp';
 
 interface ButtonProps {
   label: string;
@@ -48,10 +40,10 @@ const PALETTE: Record<ButtonVariant, Paint> = {
   outline: { bg: 'transparent', fg: colors.primary, border: colors.borderStrong },
   ghost: { bg: 'transparent', fg: colors.primary },
   danger: { bg: colors.danger, fg: colors.onAccent, elevated: true },
-  whatsapp: { bg: '#25D366', fg: '#FFFFFF', elevated: true },
-
-  gold: { bg: colors.accent, fg: colors.onAccent, elevated: true },
-  indigo: { bg: colors.primary, fg: colors.onPrimary, elevated: true },
+  // WhatsApp's own green, not ours. A share button that isn't this colour
+  // reads as "send somehow" rather than "send on WhatsApp", and the counter
+  // uses it dozens of times a day.
+  whatsapp: { bg: '#25D366', fg: colors.onAccent, elevated: true },
 };
 
 export function Button({

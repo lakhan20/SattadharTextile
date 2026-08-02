@@ -126,7 +126,7 @@ export function ServerScreen({ onBack }: { onBack: () => void }) {
             <Button
               label={t('common.save')}
               onPress={handleSave}
-              variant="indigo"
+              variant="accent"
               disabled={!valid || !dirty}
             />
           </View>

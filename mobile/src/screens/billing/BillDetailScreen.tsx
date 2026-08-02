@@ -199,7 +199,7 @@ export function BillDetailScreen({ navigation, route }: Props) {
               <Button
                 label={sharing ? t('billing.openingPdf') : t('billing.viewPdf')}
                 onPress={() => void handleSharePdf()}
-                variant="indigo"
+                variant="primary"
                 loading={sharing}
                 icon={<FileText size={18} color={colors.onPrimary} strokeWidth={ICON_STROKE} />}
               />
@@ -208,7 +208,7 @@ export function BillDetailScreen({ navigation, route }: Props) {
                 onPress={() => void handleWhatsApp()}
                 variant="whatsapp"
                 loading={sending}
-                icon={<Share2 size={18} color="#FFFFFF" strokeWidth={ICON_STROKE} />}
+                icon={<Share2 size={18} color={colors.onAccent} strokeWidth={ICON_STROKE} />}
               />
 
               {/* A cancelled bill is not corrected, it is replaced — so the

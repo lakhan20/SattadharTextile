@@ -144,7 +144,7 @@ export function SubCategoryFormScreen({ navigation, route }: Props) {
             <Button
               label={submitting ? t('common.loading') : t('subCategories.save')}
               onPress={() => void handleSave()}
-              variant="gold"
+              variant="accent"
               loading={submitting}
               style={styles.submit}
             />

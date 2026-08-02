@@ -74,8 +74,16 @@ export const colors = {
   onPrimaryMuted: '#9FC4CC',
   /** Text/icons on a filled accent or semantic surface. */
   onAccent: '#FFFFFF',
+  /**
+   * A white wash for icon rings sitting *on* a filled primary surface, where
+   * `primarySoft` would be invisible. Kept as a token so the one filled KPI
+   * tile and any future filled surface stay in step.
+   */
+  onPrimaryWash: 'rgba(255, 255, 255, 0.16)',
 
   overlay: 'rgba(7, 51, 60, 0.55)',
+  /** Full-bleed backdrop for the image viewer — near-black, not the teal scrim. */
+  scrim: 'rgba(0, 0, 0, 0.92)',
 } as const;
 
 /** Canonical spacing scale — 4/8/12/16/24/32/48. Nothing else is allowed. */
@@ -100,6 +108,66 @@ export const radius = {
 
 /** Minimum comfortable tap target. Never go below this. */
 export const TAP_TARGET = 48;
+
+/**
+ * Input heights.
+ *
+ * `TAP_TARGET` is the floor for *anything* tappable; these are the heights for
+ * things you tap and then type into, which want more room than the minimum.
+ * A field at exactly 48 is reachable but cramped — the caret sits close to the
+ * border and a mistyped rate is easy to miss when you are billing at speed.
+ *
+ * `compact` is for numeric cells sitting two-up inside a bill line, where the
+ * label above them is already carrying the identity and full field height
+ * would push a four-control row past a phone screen.
+ */
+export const control = {
+  field: 56,
+  compact: 52,
+} as const;
+
+/**
+ * Icon-ring diameters. These are *optical* sizes chosen to sit against a type
+ * size, not spacing steps — which is why they live here rather than being
+ * bent out of `spacing`. Three sizes only: beside a caption, beside a title,
+ * and the standalone ring in an empty state.
+ */
+export const ring = {
+  sm: 34,
+  md: 40,
+  lg: 64,
+} as const;
+
+/**
+ * The inset of a segmented-control track — the gap between the track border
+ * and the selected thumb. Smaller than `spacing.xs` on purpose: at 4 the thumb
+ * reads as floating rather than seated.
+ */
+export const TRACK_INSET = 3;
+
+/**
+ * ── The selvedge ─────────────────────────────────────────────────────────
+ *
+ * The signature. A selvedge is the self-finished edge of woven cloth — the
+ * band where the weft turns back on itself so the fabric cannot fray. It is
+ * the first thing anyone in the trade looks at to judge a bolt, and it is the
+ * one detail of a fabric that is unmistakably *structural* rather than
+ * decorative.
+ *
+ * So it is used here only where content genuinely ends: the top edge of the
+ * billing dock, and under a section header. Never as ornament, never on a
+ * card, never more than once in a row.
+ */
+export const selvedge = {
+  /** Distance between tick centres. Tight enough to read as a woven band. */
+  pitch: 6,
+  /** Tick length. The band is deliberately shorter than a hairline is thin. */
+  tick: 5,
+  /** Baseline the ticks hang from. */
+  strokeWidth: 1,
+  /** Ticks are a texture, not a line — they must never compete with a border. */
+  opacity: 0.28,
+} as const;
 
 /**
  * Elevation is teal-tinted rather than flat black, so a raised surface still

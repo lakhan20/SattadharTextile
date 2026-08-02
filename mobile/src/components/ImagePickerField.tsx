@@ -145,7 +145,7 @@ export function ImagePickerField({ label, remoteUri, onPick, disabled = false }:
             accessibilityLabel={t('common.close')}
             style={styles.viewerClose}
           >
-            <X size={22} color="#FFFFFF" strokeWidth={ICON_STROKE} />
+            <X size={22} color={colors.onAccent} strokeWidth={ICON_STROKE} />
           </Pressable>
           {previewUri ? <Image source={{ uri: previewUri }} style={styles.viewerImage} resizeMode="contain" /> : null}
         </View>
@@ -192,7 +192,7 @@ const styles = StyleSheet.create({
 
   viewerBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
+    backgroundColor: colors.scrim,
     alignItems: 'center',
     justifyContent: 'center',
   },
