@@ -254,6 +254,7 @@ function AdminView({
             points={data.salesTrend}
             height={160}
             emptyText={t('dashboard.trendEmpty')}
+            summaryLabel={t('dashboard.trendTotal', { days: range === '7D' ? 7 : 30 })}
             accessibilityLabel={t('dashboard.trendA11y', { days: range === '7D' ? 7 : 30 })}
           />
         </Card>

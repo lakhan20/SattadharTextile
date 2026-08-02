@@ -108,6 +108,7 @@
     "range7d": "7D",
     "range30d": "30D",
     "trendEmpty": "No sales in this period.",
+    "trendTotal": "{{days}}-day total",
     "trendA11y": "Sales for the last {{days}} days",
     "gstCaption": "Collected in {{month}}, payable to the government",
     "fyCaption": "{{fy}} sales so far: {{value}}",

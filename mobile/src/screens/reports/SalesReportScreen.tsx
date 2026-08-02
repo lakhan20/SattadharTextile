@@ -129,6 +129,7 @@ export function SalesReportScreen({ navigation }: Props) {
               <TrendChart
                 points={trendPoints}
                 emptyText={t('reports.emptySales')}
+                summaryLabel={t('reports.totalSales')}
                 accessibilityLabel={t('reports.trendA11y')}
               />
             </Card>

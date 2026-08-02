@@ -15,6 +15,8 @@ interface TrendChartProps {
   height?: number;
   /** Shown when every point is zero — an empty chart is not a chart. */
   emptyText: string;
+  /** Caption for the resting readout, e.g. "7-day total". */
+  summaryLabel: string;
   accessibilityLabel: string;
 }
 
@@ -30,10 +32,18 @@ const GRID_LINES = 3;
  * here for the brand mark.
  *
  * One measure, so one hue and no legend: the section title says what the line
- * is. Only the peak is labelled — a number on every point is noise, and on a
- * 30-day range they would overlap into a smear.
+ * is. At rest the readout is the period total — the figure the owner wants
+ * without touching anything; pressing a column swaps it for that single day.
+ * A number on every point is noise, and on a 30-day range they would overlap
+ * into a smear.
  */
-export function TrendChart({ points, height = 150, emptyText, accessibilityLabel }: TrendChartProps) {
+export function TrendChart({
+  points,
+  height = 150,
+  emptyText,
+  summaryLabel,
+  accessibilityLabel,
+}: TrendChartProps) {
   const [width, setWidth] = useState(0);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
@@ -65,14 +75,12 @@ export function TrendChart({ points, height = 150, emptyText, accessibilityLabel
         ? `${line} L${coordinates[coordinates.length - 1]!.x.toFixed(2)},${baseline} L${coordinates[0]!.x.toFixed(2)},${baseline} Z`
         : '';
 
-    const peakIndex = points.reduce((best, p, i) => (p.total > points[best]!.total ? i : best), 0);
-
-    return { coordinates, line, area, baseline, peak, peakIndex, plotWidth, plotHeight };
+    return { coordinates, line, area, baseline, peak, plotWidth, plotHeight };
   }, [points, width, height]);
 
   const hasData = points.some((point) => point.total > 0);
-  const active = geometry && activeIndex !== null ? geometry.coordinates[activeIndex] : null;
-  const highlighted = active ?? (geometry && hasData ? geometry.coordinates[geometry.peakIndex] : null);
+  const total = useMemo(() => points.reduce((sum, point) => sum + point.total, 0), [points]);
+  const highlighted = geometry && activeIndex !== null ? geometry.coordinates[activeIndex] : null;
 
   return (
     <View onLayout={onLayout} accessibilityRole="image" accessibilityLabel={accessibilityLabel}>
@@ -154,10 +162,14 @@ export function TrendChart({ points, height = 150, emptyText, accessibilityLabel
         ) : null}
       </View>
 
-      {hasData && highlighted ? (
+      {hasData ? (
         <View style={styles.readout}>
-          <Text style={styles.readoutDate}>{labelFor(highlighted.point.date)}</Text>
-          <Text style={styles.readoutValue}>{formatRupees(highlighted.point.total)}</Text>
+          <Text style={styles.readoutDate}>
+            {highlighted ? labelFor(highlighted.point.date) : summaryLabel}
+          </Text>
+          <Text style={styles.readoutValue}>
+            {formatRupees(highlighted ? highlighted.point.total : total)}
+          </Text>
         </View>
       ) : (
         <Text style={styles.empty}>{emptyText}</Text>
