@@ -82,6 +82,10 @@ if [ "$ROLE_EXISTS" != "1" ]; then
   sudo -u postgres psql -qc "CREATE ROLE $DB_USER WITH LOGIN PASSWORD '$DB_PASSWORD';"
   sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
   GENERATED_URL="postgresql://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME?schema=public"
+  # Also write it to disk: this script prints a lot, and the one line that
+  # matters is trivially lost to a scrollback limit or a closed terminal.
+  # Recovering otherwise means ALTER ROLE with a fresh password.
+  (umask 077; echo "$GENERATED_URL" > "$HOME/db-url.txt")
 else
   log "Role '$DB_USER' already exists — leaving it and its password alone"
   sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1 \
@@ -128,9 +132,25 @@ EOF
 
 if [ -n "${GENERATED_URL:-}" ]; then
   cat <<EOF
-┌─ Save this now. It is printed once and never again. ─────────────────────
+┌─ Database credentials ───────────────────────────────────────────────────
 │ DATABASE_URL=$GENERATED_URL
+│
+│ Also saved to $HOME/db-url.txt — 'cat ~/db-url.txt' to read it again.
+│ Delete that file once backend/.env is filled in.
 └──────────────────────────────────────────────────────────────────────────
+
+EOF
+else
+  cat <<'EOF'
+The database role already existed, so no new password was generated.
+If you no longer have it, set a fresh one:
+
+  NEW_PW=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
+  sudo -u postgres psql -qc "ALTER ROLE sattadhar WITH PASSWORD '$NEW_PW';"
+  (umask 077; echo "postgresql://sattadhar:$NEW_PW@localhost:5432/sattadhar?schema=public" > ~/db-url.txt)
+  cat ~/db-url.txt
+
+Then update DATABASE_URL in backend/.env to match.
 
 EOF
 fi

@@ -7,7 +7,7 @@ Fabric **wholesale + retail** trading app for a single GST-registered shop in Gu
 | **Backend** | Node.js 20 · Express · TypeScript · PostgreSQL 16 (Prisma) · JWT access+refresh with `jti` revocation |
 | **Mobile** | React Native · Expo · TypeScript · React Native Paper · Zustand · i18next (EN + ગુજરાતી) |
 | **PDF / Excel** | pdfkit · exceljs (both pure JS — ARM64-safe, no puppeteer) |
-| **Deploy** | Oracle Cloud Always Free · Ubuntu 22.04 · ARM64 (aarch64) · Mumbai · PM2 + Nginx + Cloudflare Tunnel |
+| **Deploy** | Oracle Cloud Always Free · Ubuntu 22.04 · ARM64 (aarch64) · PM2 + Nginx + Let's Encrypt — ₹0/month |
 | **Distribution** | Android-first — signed standalone APK via EAS (sideload, no Play Store) |
 
 ## Layout
@@ -124,7 +124,7 @@ npx expo export --platform android --output-dir /tmp/check   # proves it bundles
 - [docs/RUN-ON-PHONE.md](docs/RUN-ON-PHONE.md) — getting the app onto an Android phone, step by step
 - [docs/SCHEMA.md](docs/SCHEMA.md) — data model and why it is shaped this way
 - [docs/API.md](docs/API.md) — endpoint reference, error codes, RBAC rules
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Oracle Cloud ARM64, PM2, Nginx, Cloudflare Tunnel, backups *(final step)*
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — **the operations runbook**: first-time deploy, redeploying a change, what to check before changing code, staying at ₹0 on Oracle Always Free, backups, troubleshooting
 
 ## Build status
 

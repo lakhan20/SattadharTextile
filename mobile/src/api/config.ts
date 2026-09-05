@@ -5,11 +5,12 @@ export const API_PORT = 4000;
 export const API_PREFIX = '/api/v1';
 
 /**
- * Production default — the Cloudflare Tunnel HTTPS address for the shop.
- * Override at build time with EXPO_PUBLIC_API_URL, or in-app under
- * More → Server settings, which always wins.
+ * Production default — the shop's live API on Oracle Cloud. Normally the build
+ * sets EXPO_PUBLIC_API_URL (see mobile/eas.json) and this is never read; it is
+ * the fallback for a release build made without that variable, so it must be a
+ * real address rather than a placeholder. More → Server settings still wins.
  */
-export const PRODUCTION_BASE_URL = 'https://api.sattadhartextile.example';
+export const PRODUCTION_BASE_URL = 'https://130.210.50.78.nip.io';
 
 /**
  * While developing, the phone is on the same Wi-Fi as the laptop, so
