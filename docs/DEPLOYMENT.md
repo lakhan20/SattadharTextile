@@ -65,7 +65,21 @@ While you're in the account: **Identity → My Profile → enable MFA.** This ac
 
 Name it `sattadhar-vcn`, accept every default CIDR, click through. This gives you a public subnet, an internet gateway, and a route table in about 60 seconds.
 
-You do **not** need to open any ports in the security list. The Cloudflare Tunnel dials out; nothing dials in except SSH, which the wizard already allows on port 22. (If you take the no-domain path in E2, you'll come back and open 80/443.)
+> **Use the wizard, not the plain `Create VCN` button.** They sit next to each other on the same page and look interchangeable, but plain *Create VCN* produces an empty network — no subnet, no internet gateway, no route — and an instance launched into it is unreachable. Depending on console version the wizard is either a **"Start VCN Wizard"** button beside `Create VCN`, or an entry in the **Actions** dropdown.
+>
+> <details>
+> <summary>Already went through the plain form? Finish it by hand — four steps.</summary>
+>
+> On the create form, the field marked *Required* is **IPv4 CIDR Blocks** → `10.0.0.0/16`. Tick **"Use DNS hostnames in this VCN"** (it cannot be changed later), leave IPv6 and the DNS label alone, and create. Then from the VCN's detail page:
+>
+> 1. **Internet Gateways → Create Internet Gateway** → name `sattadhar-igw`.
+> 2. **Route Tables → "Default Route Table for sattadhar-vcn" → Add Route Rules** → Target Type **Internet Gateway**, Destination CIDR `0.0.0.0/0`, Target `sattadhar-igw`. Without this rule the subnet is public in name only.
+> 3. **Subnets → Create Subnet** → name `sattadhar-public`, type **Regional**, IPv4 CIDR `10.0.0.0/24`, Route Table *Default Route Table*, Subnet Access **Public Subnet**, Security List *Default*.
+> 4. **Security Lists → Default Security List** → confirm the ingress rule for `0.0.0.0/0` TCP port `22` is present (it is, by default).
+>
+> </details>
+
+You do **not** need to open any ports in the security list. The Cloudflare Tunnel dials out; nothing dials in except SSH, which is already allowed on port 22. (If you take the no-domain path in E2, you'll come back and open 80/443.)
 
 ### A5. Make an SSH key on Windows
 
@@ -95,7 +109,7 @@ Check for the **"Always Free-eligible"** badge before you click Create.
 
 > **"Out of host capacity" / "Out of capacity for shape VM.Standard.A1.Flex".**
 > This is the single most common blocker and it is not your fault — free ARM capacity in Indian regions is heavily contested. In order:
-> 1. Retry. Change the **Availability Domain** dropdown (AD-1 / AD-2 / AD-3) and try each.
+> 1. Retry, and change the **Availability Domain** dropdown (AD-1 / AD-2 / AD-3) if your region has more than one. Note that `ap-mumbai-1` and `ap-hyderabad-1` each have only a **single AD**, so in those regions this lever doesn't exist — plain retrying is all you have.
 > 2. Ask for less: **1 OCPU / 6 GB** succeeds far more often than 4/24. This app runs fine on 1 OCPU.
 > 3. Retry at off-peak hours (02:00–06:00 IST). Capacity is released continuously.
 > 4. **Upgrade to Pay As You Go** (Billing → Upgrade). Counter-intuitive but effective: PAYG accounts are served A1 capacity ahead of trial accounts, **and your Always Free resources stay free** — you are only billed if you exceed the free allowances, which this setup never does. With the budget alert from A3 in place this is low-risk.
