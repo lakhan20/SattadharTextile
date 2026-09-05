@@ -1,0 +1,39 @@
+# Cloudflare Tunnel — publishes the API on HTTPS without opening a single
+# inbound port on the Oracle instance.
+#
+# Install to /etc/cloudflared/config.yml (see docs/DEPLOYMENT.md, Part E1):
+#
+#   cloudflared tunnel login                     # opens a browser URL, pick your domain
+#   cloudflared tunnel create sattadhar          # prints a tunnel UUID
+#   cloudflared tunnel route dns sattadhar api.<your-domain>
+#   sudo mkdir -p /etc/cloudflared
+#   sudo cp deploy/cloudflared/config.yml /etc/cloudflared/config.yml
+#   sudo cp ~/.cloudflared/<UUID>.json /etc/cloudflared/
+#   # edit the two <UUID> placeholders and the hostname below
+#   sudo cloudflared service install
+#   sudo systemctl enable --now cloudflared
+#
+# Replace <UUID> with the value printed by `tunnel create`, and
+# api.example.com with the hostname you routed.
+
+tunnel: <UUID>
+credentials-file: /etc/cloudflared/<UUID>.json
+
+# Outbound-only connections to Cloudflare's edge; nothing listens publicly.
+# Four connections is the default and gives redundancy across edge colos.
+protocol: quic
+loglevel: info
+metrics: 127.0.0.1:2000
+
+ingress:
+  - hostname: api.example.com
+    service: http://127.0.0.1:80
+    originRequest:
+      # Nginx is on the same host, so a short connect timeout is right.
+      connectTimeout: 10s
+      # PDF/Excel generation can be slow on a free-tier ARM core.
+      noTLSVerify: true
+      httpHostHeader: api.example.com
+
+  # Required: every ingress list must end with a catch-all.
+  - service: http_status:404
